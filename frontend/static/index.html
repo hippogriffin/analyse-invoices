@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Invoice Upload</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="shell__header">
+        <h1>Invoice Upload</h1>
+        <p class="shell__subtitle">
+          Take a photo of an invoice, or upload one you already have.
+        </p>
+      </header>
+
+      <div id="banner" class="banner" role="alert" hidden></div>
+
+      <section id="modePicker" class="modes" aria-label="Add an invoice">
+        <h2 class="modes__title">Add an invoice</h2>
+        <div class="modes__actions">
+          <button id="chooseCamera" type="button" class="button button--primary">
+            Take a photo
+          </button>
+          <button id="chooseFile" type="button" class="button button--secondary">
+            Upload a photo
+          </button>
+        </div>
+      </section>
+
+      <!--
+        Kept in the accessibility tree and focusable on purpose: pressing Enter
+        on the input opens the picker natively. A `display: none` input is
+        unreliable to trigger from script in some browsers, and the button
+        below is a plain call to .click() on it.
+      -->
+      <input
+        id="fileInput"
+        class="visually-hidden"
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+      />
+
+      <div id="workbench" class="workbench" hidden>
+        <section class="stage" aria-label="Invoice image">
+          <video
+            id="preview"
+            class="stage__media"
+            autoplay
+            playsinline
+            muted
+            hidden
+          ></video>
+          <img id="still" class="stage__media" alt="Selected invoice" hidden />
+          <div id="placeholder" class="stage__placeholder">
+            <div class="spinner" aria-hidden="true"></div>
+            <p id="placeholderText">Starting camera…</p>
+            <button id="retry" type="button" class="button button--ghost" hidden>
+              Try again
+            </button>
+            <button id="pickFile" type="button" class="button button--primary" hidden>
+              Choose a photo
+            </button>
+          </div>
+        </section>
+
+        <section class="controls" aria-label="Actions">
+          <button id="capture" type="button" class="button button--primary" disabled>
+            Take photo
+          </button>
+          <div class="controls__group" id="reviewActions" hidden>
+            <button id="retake" type="button" class="button button--secondary">Retake</button>
+            <button id="upload" type="button" class="button button--primary">Upload</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="progress__bar" id="progressBar"></div>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section
+        id="results"
+        class="results"
+        aria-label="Extracted invoice details"
+        aria-live="polite"
+        hidden
+      >
+        <h2 class="results__title" id="resultsTitle">Analysis</h2>
+        <p class="results__message" id="resultsMessage"></p>
+        <div class="results__body" id="resultsBody"></div>
+
+        <div class="verdict" id="verdict" hidden>
+          <p class="verdict__question" id="verdictQuestion">
+            Are these values correct?
+          </p>
+          <p class="verdict__note" id="verdictNote">
+            The photo is deleted once its fields have been read, so if it was too
+            blurry, or the values returned are not correct, say so now and take another.
+          </p>
+          <div class="verdict__actions">
+            <button type="button" class="button" id="photoOkay">
+              Yes, it is readable
+            </button>
+            <button type="button" class="button button--quiet" id="retakePhoto">
+              No, retake it
+            </button>
+          </div>
+          <p class="verdict__status" id="verdictStatus" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
