@@ -168,9 +168,11 @@ fails, since a failure is asked nothing and would otherwise leave no way to
 start again.
 
 The answer is held by the backend for as long as the process lives, so it is
-asked once rather than on every poll — but a service restart clears it and the
-question returns. A failed call is reported in the panel and the question stays
-open, with both buttons enabled again, so the choice can be retried.
+asked once rather than on every poll. A restart clears it, with one exception: a
+*stored* record is its own proof that it was accepted, so an accepted invoice is
+not asked about again even though the flag is gone. A failed call is reported in
+the panel and the question stays open, with both buttons enabled again, so the
+choice can be retried.
 
 ## Deploy to Azure Container Apps
 

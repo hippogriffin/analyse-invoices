@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
 
-# eocdocumentintelligence.blob.core.windows.net -> eocdocumentintelligence
 BLOB_HOST_PATTERN = re.compile(r"^(?P<account>[^.]+)\.(?:privatelink\.)?blob\.core\.")
 
 # The GA Document Intelligence SDK talks to a resource endpoint. The legacy

@@ -83,6 +83,19 @@ durable facts about the invoice. So:
 - `tests/test_job_state.py` and the API tests pin this both ways, so a
   passing response is never mistaken for evidence that something was stored.
 
+The store is bounded on two axes: 64 entries, least-recently-used first, and 30
+minutes since anything last touched an entry. Polling the status counts as
+touching it, so the limit is about being forgotten rather than a deadline — a
+reviewer who is still looking cannot have the values expire underneath them,
+which matters now that the record is written at the moment they accept. A
+restart drops everything at once.
+
+Only the **latest** attempt at an invoice is held. A retry replaces the entry
+outright rather than adding to it, so there is no history of failures, just the
+current reason — which is what the reviewer needs on screen. The one immediate
+discard is a blob write that failed before any analysis was queued: the claim is
+released there so the photo can simply be sent again.
+
 ### The photo is always deleted, and the user is asked about quality
 
 Every source photo is deleted from blob storage once it has been read, in a

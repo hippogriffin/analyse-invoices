@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.config import JobStatus
-from app.job_state import JobStateStore, get_job_state, overlay
+from app.job_state import TTL_SECONDS, JobStateStore, get_job_state, overlay
 
 PARTITION = "abc123"
 
@@ -287,3 +287,43 @@ class TestOverlay:
         get_job_state().complete(PARTITION, LIVE_DOCUMENTS)
         merged = overlay(PARTITION, [STORED_DOCUMENTS[0]])
         assert set(merged[0]["fields"]) == {"VendorName", "InvoiceTotal"}
+
+
+def test_looking_at_a_result_keeps_it_alive() -> None:
+    """The TTL is about being forgotten, not about reaching a deadline.
+
+    ``TTL_SECONDS`` is documented as holding a result "nobody is looking at any
+    more". Polling is looking, so a client that keeps checking the status must not
+    have the answer expire underneath it -- and since the record is only written
+    when the reviewer accepts, an expiry now costs the reviewer the values they
+    were in the middle of judging.
+    """
+    now = [1000.0]
+    store = JobStateStore(clock=lambda: now[0])
+    store.begin("inv")
+    store.complete("inv", [{"index": 0, "confidence": 0.9, "fields": {}}])
+
+    for second in range(1, 5 * TTL_SECONDS):
+        now[0] = 1000.0 + second
+        assert store.get("inv") is not None, f"expired while still being read, at {second}s"
+
+    # Once nobody asks, it still goes.
+    now[0] += TTL_SECONDS + 1
+    assert store.get("inv") is None
+
+
+def test_a_failure_survives_being_polled_and_then_stops_being_asked_about() -> None:
+    """The reason a read failed is kept for as long as anyone is watching."""
+    now = [1000.0]
+    store = JobStateStore(clock=lambda: now[0])
+    store.begin("inv")
+    store.fail("inv", "The photo was too blurry to read.")
+
+    for second in range(1, 2 * TTL_SECONDS):
+        now[0] = 1000.0 + second
+        held = store.get("inv")
+        assert held is not None, f"the failure was dropped at {second}s"
+        assert held.error == "The photo was too blurry to read."
+
+    now[0] += TTL_SECONDS + 1
+    assert store.get("inv") is None

@@ -155,12 +155,21 @@ class JobStateStore:
         self._update(partition, lambda state: setattr(state, "satisfied", satisfied))
 
     def get(self, partition: str) -> JobState | None:
-        """The held state for an invoice, or ``None`` if it is not held."""
+        """The held state for an invoice, or ``None`` if it is not held.
+
+        Reading refreshes the entry's age. The TTL exists so a result nobody is
+        looking at any more is not held for ever, and a client polling the status
+        is looking: without this the entry expires on schedule regardless of the
+        attention it is getting. That matters more than it used to, because the
+        record is only written when the reviewer accepts, so an expiry part-way
+        through a long review takes away the values they are judging.
+        """
         with self._lock:
             self._evict_locked()
             entry = self._entries.get(partition)
             if entry is None:
                 return None
+            entry.stored_at = self._clock()
             self._entries.move_to_end(partition)
             return JobState(
                 status=entry.state.status,

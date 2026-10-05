@@ -174,7 +174,7 @@ default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 
 ```bash
 (cd frontend && ../backend/.venv/bin/python -m pytest)  # 58 checks
-(cd backend  && .venv/bin/python -m pytest)  # 217 checks
+(cd backend  && .venv/bin/python -m pytest)  # 219 checks
 node frontend/scripts/check_ui.js            # 142 DOM checks, needs: npm install jsdom
 ```
 
