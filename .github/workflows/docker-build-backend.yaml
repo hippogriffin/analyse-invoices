@@ -45,11 +45,11 @@ jobs:
           echo "::set-output name=BUILD_ID::${sha}-${ts}"
 
       - name: Build and push Docker images
-        id: push_squword
+        id: push_backend
         uses: docker/build-push-action@v7
         with:
           platforms: linux/amd64, linux/arm64
           push: true
-          tags: ghcr.io/hippogriffin/squword:${{ steps.prep.outputs.BUILD_ID }}
+          tags: ghcr.io/hippogriffin/analyse-invoices-backend:${{ steps.prep.outputs.BUILD_ID }}
           context: ./backend
       

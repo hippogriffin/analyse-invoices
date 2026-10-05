@@ -25,7 +25,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push Docker images
-        id: push_squword
+        id: push_backend
         uses: docker/build-push-action@v7
         with:
           platforms: linux/amd64, linux/arm64
