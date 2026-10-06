@@ -230,10 +230,14 @@ class TestTableEndpoint:
 
 def test_table_client_uses_the_table_endpoint() -> None:
     """The SDK must never be handed the blob host for a table operation."""
+    from urllib.parse import urlparse
+
     from app.clients import table_client
 
     client = table_client(Settings(**_env()))
-    assert client.url.startswith("https://acct.table.core.windows.net")
+    parsed = urlparse(client.url)
+    assert parsed.scheme == "https"
+    assert parsed.hostname == "acct.table.core.windows.net"
     assert "blob.core" not in client.url
 
 
