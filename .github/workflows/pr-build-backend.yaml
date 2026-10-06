@@ -30,7 +30,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: analyse-invoices-backend:${{ github.sha }}
+          image-ref: 'gcr.io/hippogriffin/analyse-invoices-backend:${{ github.sha }}'
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
