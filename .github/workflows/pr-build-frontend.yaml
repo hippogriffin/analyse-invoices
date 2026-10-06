@@ -24,13 +24,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build an image from Dockerfile
-        run: docker build -t gcr.io/hippogriffin/analyse-invoices-frontendend:${{ github.sha }} ./frontend
+      - name: Build and push Docker images
+        id: push_frontend
+        uses: docker/build-push-action@v7
+        with:
+          platforms: linux/amd64
+          push: false
+          context: ./frontend
+          load: true
+          tags: analyse-invoices-frontend:${{ github.sha }}
       
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: gcr.io/hippogriffin/analyse-invoices-frontend:${{ github.sha }}
+          image-ref: analyse-invoices-frontend:${{ github.sha }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
