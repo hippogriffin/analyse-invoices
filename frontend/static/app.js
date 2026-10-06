@@ -382,7 +382,7 @@
     releasePhotoUrl();
     state.photoUrl = URL.createObjectURL(photo);
 
-    els.still.src = state.photoUrl;
+    els.still.src = encodeURI(state.photoUrl);
     els.still.hidden = false;
     els.preview.hidden = true;
     hidePlaceholder();
