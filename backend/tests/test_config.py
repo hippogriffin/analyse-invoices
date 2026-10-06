@@ -176,7 +176,7 @@ class TestConfigurationWarnings:
         assert settings.uses_legacy_di_endpoint
         warning = settings.config_warnings()[0]
         assert "legacy multi-service" in warning
-        assert "cognitiveservices.azure.com" in warning
+        assert "https://<resource-name>.cognitiveservices.azure.com" in warning
 
     def test_non_https_storage_url_is_flagged(self) -> None:
         settings = Settings(
