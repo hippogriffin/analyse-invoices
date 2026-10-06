@@ -31,7 +31,7 @@ jobs:
           platforms: linux/amd64, linux/arm64
           push: false
           context: ./backend
-          load: true
+          outputs: type=cacheonly
           tags: analyse-invoices-backend:${{ github.sha }}
       
       - name: Run Trivy vulnerability scanner
