@@ -7,9 +7,6 @@ it, and only then written to Table Storage.
 This service owns every Azure credential and every blob name. The browser posts
 the image itself; it never names a blob and never holds a key.
 
-This replaces the Azure Logic App in `../logic-app.json`. It is a plain
-container, so it builds and runs the same way as the frontend.
-
 ## How it works
 
 ```
@@ -189,26 +186,6 @@ would otherwise keep the values the reviewer rejected. Table Storage caps a
 transaction at 100 entities, so the operations are chunked for a very large
 document set. Nothing is written before a reviewer accepts, so a failure and an
 unanswered question both leave no row at all.
-
-## The failure this fixes
-
-`logic-app.json` called `Analyze Document` and then read `analyzeResult`
-directly. Document Intelligence is a long-running operation: it returns `202`
-with an `Operation-Location` header, and the results are only there once a
-subsequent request returns `200`. The workflow had no poll and no timeout, so
-it read a body that did not exist yet.
-
-Here the LRO is handled by the SDK's poller:
-
-```python
-poller = client.begin_analyze_document("prebuilt-invoice", photo_bytes)
-result = poller.result(timeout=settings.analysis_timeout_seconds)
-```
-
-It also wrote a random GUID as both `PartitionKey` and `RowKey`, so a
-redelivered event produced a duplicate row that could never be found again. The
-partition key is the content hash here, so a repeated submission overwrites its
-own results.
 
 ### Two storage endpoints
 
