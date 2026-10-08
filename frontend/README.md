@@ -47,12 +47,17 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 
 cp .env.example .env    # then point ANALYSIS_API_BASE_URL at the backend
-uvicorn app.main:app --reload
+python -m app
 ```
 
-Open <http://localhost:8000>. `localhost` counts as a secure context, so the
-camera works. On any other host you need real HTTPS, otherwise browsers block
-camera access and the app shows that error.
+`HOST` defaults to `0.0.0.0`, which binds every interface, so the UI is reachable
+from any IP (for example `http://<lan-ip>:8000`) as well as <http://localhost:8000>.
+Set `HOST=127.0.0.1` to restrict it to the local machine. For a reloading dev
+server run `uvicorn app.main:app --host 0.0.0.0 --reload` directly.
+
+`localhost` counts as a secure context, so the camera works there. On any other
+host you need real HTTPS, otherwise browsers block camera access and the app
+shows that error.
 
 Run the tests:
 
@@ -94,6 +99,8 @@ All settings come from environment variables (see `.env.example`):
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ANALYSIS_API_BASE_URL` | – | Where the photo is posted. Empty means there is nowhere to send it |
+| `HOST` | `0.0.0.0` | Interface the UI listens on. `0.0.0.0` is reachable from any IP |
+| `PORT` | `8000` | Port the UI listens on |
 | `MAX_UPLOAD_BYTES` | `10485760` | Size cap offered to the UI (10 MB). The backend enforces its own |
 | `ALLOWED_CONTENT_TYPES` | `image/jpeg,image/png,image/webp` | Image types offered in the file chooser |
 

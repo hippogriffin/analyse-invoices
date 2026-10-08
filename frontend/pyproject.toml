@@ -17,6 +17,9 @@ dev = [
     "pytest>=8.3",
 ]
 
+[project.scripts]
+invoice-upload = "app.__main__:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

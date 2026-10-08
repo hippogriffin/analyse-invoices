@@ -75,7 +75,7 @@ cd frontend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env      # point ANALYSIS_API_BASE_URL at the backend
-uvicorn app.main:app --reload
+python -m app             # HOST defaults to 0.0.0.0 (any IP); PORT to 8000
 ```
 
 Container build (the build context is `frontend/`, not the repo root):
@@ -111,10 +111,10 @@ Two terminals:
 
 ```bash
 cd backend  && .venv/bin/uvicorn app.main:app --port 3333 --reload
-cd frontend && .venv/bin/uvicorn app.main:app --port 8001 --reload
+cd frontend && PORT=8001 .venv/bin/python -m app
 ```
 
-Then open `http://localhost:8001`. The analysis service allows all origins by
+Then open `http://localhost:8001`, or `http://<lan-ip>:8001` from another device. The analysis service allows all origins by
 default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 
 ## Repository layout
