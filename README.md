@@ -48,26 +48,13 @@ chosen photo over the network, so it holds no credentials of any kind.
 6. **The record is created only on "Yes, it is readable"**, which is the single
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
-   somebody has rejected is never stored and never left on screen to be accepted
-   by mistake.
+   somebody has rejected is never stored.
 7. The photo is deleted from blob storage as soon as it has been read, whether
    the analysis succeeded, failed or was rejected.
 
 `ANALYSIS_API_BASE_URL` on the frontend points at step 2 onward. It has no
 default: with no backend URL there is nowhere to send a photo, so the UI says so
 and refuses to submit.
-
-### Why the backend owns storage
-
-The browser used to upload the photo itself and pass on the resulting blob name.
-That put a storage key in the service that serves pages to anyone who can reach
-it, and split the request across two services that had to agree on container and
-prefix settings. Posting the file to the backend instead means:
-
-- the frontend needs no Azure credentials, SDK or configuration at all;
-- the backend decides the blob name, so a caller cannot aim a submission at an
-  unrelated blob;
-- the two services share no storage settings, only a URL.
 
 ### Repeated submissions
 
@@ -77,31 +64,11 @@ page. The response carries `alreadyProcessed`, and the UI says the photo was
 already processed and stops there rather than showing a result that was not
 re-derived.
 
-Claiming the photo is one atomic step that happens *before* the blob write, not a
-check followed by a later claim. The write is awaited, so doing it in that order
-left a window in which a second request for the same photo saw nothing claimed
-and queued a second billable analysis.
-
-A photo that previously *failed* is re-analysed, so a retry is never blocked by
-the dedupe.
-
-### Why this replaced the Logic App
-
-`logic-app.json` called `Analyze Document` and read `analyzeResult` without
-polling. Document Intelligence is a long-running operation: it returns `202`
-with an `Operation-Location` header, and the results appear on a later request.
-The workflow had no poll and no timeout, so it read a body that was not there
-yet. It also wrote a random GUID as both `PartitionKey` and `RowKey`, so a
-redelivered event produced a duplicate row that could never be found again.
-
-`backend/` handles the poll through the SDK's LRO poller, and derives the
-partition key from the photo's content, so a repeated submission overwrites its
-own results.
+Claiming the photo is one atomic step that happens before the blob write. A photo that previously failed is re-analysed.
 
 ## frontend/
 
-See [`frontend/README.md`](frontend/README.md) for local development, the test
-suite, and Azure Container Apps deployment.
+See [`frontend/README.md`](frontend/README.md) for local development and the test suite.
 
 ```bash
 cd frontend
