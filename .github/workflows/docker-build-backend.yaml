@@ -6,7 +6,7 @@ on:
     - cron:  '0 3 * * 1'
   push:
     branches:
-      - master
+      - main
     paths:
       - package.json
 
