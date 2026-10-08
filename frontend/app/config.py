@@ -37,6 +37,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Network. The default binds every interface so the UI is reachable from
+    # any IP, not just the loopback address. Override HOST to lock it down.
+    host: str = Field(default="0.0.0.0")
+    port: int = Field(default=8000)
+
     # UI limits. The backend enforces the same rules authoritatively; these
     # exist so an unusable photo is rejected in the browser instead of after an
     # upload. Keep them in step with the backend's MAX_UPLOAD_BYTES and
