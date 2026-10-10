@@ -31,9 +31,11 @@ class Settings(BaseSettings):
     analysis_api_base_url: str = Field(
         default="",
         description=(
-            "Base URL of the invoice analysis service. The photo is posted "
-            "here; this service never touches storage or Document Intelligence "
-            "itself. When empty the UI can capture a photo but cannot submit it."
+            "Base URL of the invoice analysis service. The browser's upload and "
+            "poll calls are forwarded here by this service, which never touches "
+            "storage or Document Intelligence itself. It only has to be reachable "
+            "from this container, so an in-cluster Kubernetes service name works. "
+            "When empty the UI can capture a photo but cannot submit it."
         ),
     )
 

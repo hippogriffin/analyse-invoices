@@ -1,8 +1,10 @@
-"""Serves the invoice UI.
+"""Serves the invoice UI, and forwards its API calls to the backend.
 
 This service has no storage and no Document Intelligence access. It renders the
-page, tells the browser where the analysis backend lives, and does nothing else:
-the chosen photo is posted straight to the backend, which owns the Azure side.
+page and proxies the browser's upload/status/verdict calls to the analysis
+backend, which owns the Azure side. The browser only ever talks to this service,
+so the backend can sit behind a cluster-internal address the browser could not
+resolve on its own.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
+from app.proxy import router as invoices_router
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(title="Invoice Upload", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(invoices_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -38,14 +42,15 @@ async def healthz() -> JSONResponse:
 async def api_config() -> dict[str, object]:
     """Everything the UI needs to capture a photo and submit it.
 
-    Deliberately non-secret: there is nothing secret here any more. The upload
-    limits are echoed so the UI can offer the right formats in the file chooser
-    and reject an unusable file early; the backend enforces the same rules.
+    Deliberately non-secret. The upload limits are echoed so the UI can offer the
+    right formats in the file chooser and reject an unusable file early; the
+    backend enforces the same rules. The analysis backend's own address is not
+    sent: the browser posts to this service, which forwards on, so the address
+    can stay internal and the browser has no use for it.
     """
     settings = get_settings()
     return {
         "maxUploadBytes": settings.max_upload_bytes,
         "allowedContentTypes": list(settings.allowed_content_types),
-        "analysisApiBaseUrl": settings.analysis_api_base_url,
         "analysisConfigured": settings.is_analysis_configured,
     }

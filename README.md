@@ -6,25 +6,23 @@ Only the backend talks to Azure. The frontend is a camera UI that hands the
 chosen photo over the network, so it holds no credentials of any kind.
 
 ```
-┌──────────────────────────┐        ┌──────────────────┐
-│  frontend/               │        │  Blob Storage    │
-│  camera UI + file        │───────▶│  container       │
-│  chooser, no Azure       │  post  │  pictures/2026/  │
-│  access (FastAPI)        │  photo │                  │
-└────────────┬─────────────┘        └────────┬─────────┘
-             │                               │ read back the photo
-             │                        ┌──────┴──────────┐
-             │ polls for results      │  backend/       │
-             │◀───────────────────────│  Blob Storage   │
-             │  extracted fields      │  + Document     │
-             │                        │    Intelligence │
-             │                        │  + Table Storage│
-             │                        └─────────────────┘
+┌──────────────┐ post/poll ┌──────────────────┐  forward  ┌──────────────────┐
+│  browser     │           │  frontend/       │──────────▶│  backend/        │
+│  camera UI   │──────────▶│  UI + reverse    │  photo    │  Blob Storage    │
+│              │◀──────────│  proxy, no Azure │◀──────────│  + Document      │
+└──────────────┘  fields   │  (FastAPI)       │  fields   │    Intelligence  │
+                           └──────────────────┘           │  + Table Storage │
+                                                          └────────┬─────────┘
+                                                                   │
+                                                          ┌────────▼─────────┐
+                                                          │  Blob Storage    │
+                                                          │  container       │
+                                                          └──────────────────┘
 ```
 
 | Directory | What it is | Runs as |
 | --- | --- | --- |
-| [`frontend/`](frontend/README.md) | Camera UI and file chooser. Serves the page and holds no Azure credentials | Docker container |
+| [`frontend/`](frontend/README.md) | Camera UI and file chooser. Serves the page, forwards API calls to the backend, and holds no Azure credentials | Docker container |
 | [`backend/`](backend/README.md) | Stores the photo, analyses it, and keeps the extracted invoice fields | Docker container |
 | `logic-app.json` | The Azure Logic App this replaces. Kept for reference. | Azure resource — **not** a container |
 
@@ -32,8 +30,9 @@ chosen photo over the network, so it holds no credentials of any kind.
 
 1. The user photographs an invoice, or picks one that already exists on the
    device. `frontend/` captures or previews it and does nothing else.
-2. The browser posts the file to `backend/`, which returns an invoice id
-   immediately and continues in a background task.
+2. The browser posts the file to `frontend/`, which forwards it to `backend/`.
+   The backend returns an invoice id immediately and continues in a background
+   task.
 3. `backend/` writes the photo to the `pictures` container with a managed
    identity (or an account key for local testing). It names the blob itself,
    from the photo's content hash.
@@ -42,9 +41,9 @@ chosen photo over the network, so it holds no credentials of any kind.
    is worth keeping until someone has looked at it. Confidence scores are
    returned to the browser but not stored, since a score is only useful while
    someone is reading the result.
-5. The browser polls `GET /api/invoices/{id}` and renders the fields, with
-   per-field confidence so a low-confidence reading is visible at a glance, then
-   asks whether the photo was good enough.
+5. The browser polls `GET /api/invoices/{id}` (through the frontend proxy) and
+   renders the fields, with per-field confidence so a low-confidence reading is
+   visible at a glance, then asks whether the photo was good enough.
 6. **The record is created only on "Yes, it is readable"**, which is the single
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
@@ -52,9 +51,11 @@ chosen photo over the network, so it holds no credentials of any kind.
 7. The photo is deleted from blob storage as soon as it has been read, whether
    the analysis succeeded, failed or was rejected.
 
-`ANALYSIS_API_BASE_URL` on the frontend points at step 2 onward. It has no
-default: with no backend URL there is nowhere to send a photo, so the UI says so
-and refuses to submit.
+`ANALYSIS_API_BASE_URL` on the frontend points at step 2 onward and is used by
+the frontend's reverse proxy, not by the browser. It has no default: with no
+backend URL there is nowhere to send a photo, so the UI says so and refuses to
+submit. Because the browser never sees the address, it may be one the browser
+cannot resolve, such as a Kubernetes service name.
 
 ### Repeated submissions
 
@@ -101,9 +102,9 @@ uvicorn app.main:app --reload
 docker build -t invoice-analysis ./backend
 ```
 
-The browser posts to this service from another origin, so set
-`CORS_ALLOW_ORIGINS` to the frontend's URL before exposing it. `*` is fine for
-local work.
+The browser no longer talks to this service directly: the frontend proxies to
+it server-to-server, so `CORS_ALLOW_ORIGINS` is not needed for the UI. It
+remains available for anything that calls this API from a browser directly.
 
 ## Running both locally
 
