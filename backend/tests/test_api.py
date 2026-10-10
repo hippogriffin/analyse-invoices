@@ -268,6 +268,19 @@ class TestAPhotoVerdict:
         assert response.status_code == 409
         assert "accept" in response.json()["detail"]
 
+    def test_corrections_cannot_accept_a_failed_analysis(
+        self, client, stub_azure, table
+    ) -> None:
+        """A correction is still an acceptance, so it needs a reading behind it."""
+        stub_azure["error"] = "The photo is too blurry."
+        post_photo(client, photo=OTHER_PHOTO)
+        response = client.post(
+            f"/api/invoices/{dedupe_key(OTHER_PHOTO)}/photo",
+            json={"documents": [{"index": 0, "fields": {"VendorName": {"value": "X"}}}]},
+        )
+        assert response.status_code == 409
+        assert table.entities == {}
+
     def test_asking_for_a_retake_keeps_nothing(
         self, client, stub_azure, table
     ) -> None:
@@ -307,6 +320,92 @@ class TestAPhotoVerdict:
             if not name.startswith("odata.")
         }
         assert not [name for name in stored if "atisf" in name], sorted(stored)
+
+    def test_the_reviewer_can_supply_a_missing_field(
+        self, client, stub_azure, table
+    ) -> None:
+        """Document Intelligence did not return a merchant, so the reviewer types one.
+
+        The supplied value is merged over the reading before the record is
+        written: this is the one path where a person's correction counts where
+        an OCR row would have sat.
+        """
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {
+                        "index": 0,
+                        "fields": {
+                            "VendorName": {"value": "Acme Wholesale"},
+                            "InvoiceTotal": {"value": "999.00 EUR"},
+                        },
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["photoSatisfied"] is True
+        row = table.entities[(PARTITION, "doc-000")]
+        assert row["f_VendorName"] == "Acme Wholesale"
+        assert row["f_InvoiceTotal"] == "999.00 EUR"
+
+    def test_a_field_not_named_in_corrections_keeps_its_extracted_value(
+        self, client, stub_azure, table
+    ) -> None:
+        post_photo(client)
+        client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={"documents": [{"index": 0, "fields": {"VendorName": {"value": "Fixed"}}}]},
+        )
+        row = table.entities[(PARTITION, "doc-000")]
+        assert row["f_VendorName"] == "Fixed"
+        assert row["f_InvoiceTotal"] == "120.00 EUR"
+
+    def test_a_cleared_field_is_stored_empty(
+        self, client, stub_azure, table
+    ) -> None:
+        """A reviewer who blanks a misread field can make it disappear too."""
+        post_photo(client)
+        client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={"documents": [{"index": 0, "fields": {"InvoiceTotal": {"value": ""}}}]},
+        )
+        assert table.entities[(PARTITION, "doc-000")]["f_InvoiceTotal"] == ""
+
+    def test_corrections_update_an_already_stored_record(
+        self, client, stub_azure, table
+    ) -> None:
+        """A stored reading can be corrected and re-saved.
+
+        This covers the reviewer landing on a stored record (e.g. after a
+        restart) and fixing a value before re-confirming. The second write is
+        the point of the corrections, so it must not be skipped the way a plain
+        repeat confirmation is.
+        """
+        post_photo(client)
+        client.post(f"/api/invoices/{PARTITION}/photo")
+        assert table.entities[(PARTITION, "doc-000")]["f_VendorName"] == "Acme"
+
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={"documents": [{"index": 0, "fields": {"VendorName": {"value": "Renamed"}}}]},
+        )
+        assert response.status_code == 200
+        assert table.entities[(PARTITION, "doc-000")]["f_VendorName"] == "Renamed"
+
+    def test_corrections_for_a_missing_document_are_ignored(
+        self, client, stub_azure, table
+    ) -> None:
+        """A wrong index cannot invent a page that never existed."""
+        post_photo(client)
+        client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={"documents": [{"index": 9, "fields": {"VendorName": {"value": "Ghost"}}}]},
+        )
+        assert "doc-009" not in table.entities
+        assert table.entities[(PARTITION, "doc-000")]["f_VendorName"] == "Acme"
 
     def test_an_unknown_invoice_is_rejected(self, client) -> None:
         assert client.post("/api/invoices/nope/photo").status_code == 404

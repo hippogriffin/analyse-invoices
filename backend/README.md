@@ -114,6 +114,29 @@ says the photo was readable. Until then the result exists in this process alone,
 so a row in the table means exactly one thing: *these values were read from a
 photo, and a person accepted them.*
 
+### Correcting a reading
+
+Document Intelligence reads some fields wrong and misses others, so the reviewer
+can fix the reading before accepting it. The values, including any fields that
+were not returned, are sent as an optional JSON body on the accept request:
+
+```
+POST /api/invoices/{invoiceId}/photo
+{"documents": [{"index": 0, "fields": {"VendorName": {"value": "Acme Ltd"}}}]}
+```
+
+Each corrected document is matched by its `index` and only the fields it names
+are overridden; anything else keeps its extracted value, so a partial correction
+is enough. A field given an empty value is stored empty, and a correction for a
+page the model did not return is ignored rather than inventing a document. The
+merged result is what gets written, so the record holds what the reviewer
+approved. Omitting the body stores the reading exactly as it came out of the
+model, and a second plain confirmation remains a no-op rather than a rewrite.
+
+Corrections also work on an already-stored record, which is how a value is fixed
+after a restart hands back a stored reading. Nothing about a confidence score is
+carried in a correction: a reading rewritten by a person has no meaningful score.
+
 Saying no therefore takes the result away rather than recording an opinion about
 it. It deletes every row for the partition and returns `204` with no body, so the
 caller has nothing to render. That includes a record accepted before a restart,
@@ -276,7 +299,7 @@ In Azure, the identity needs:
 | ------ | --------------------------- | ---------------------------------------- |
 | `POST` | `/api/invoices`             | Store and analyse a photo, returns `202` |
 | `GET`  | `/api/invoices/{invoiceId}` | Status and extracted fields              |
-| `POST` | `/api/invoices/{invoiceId}/photo` | Accept the reading; stores it, `200` |
+| `POST` | `/api/invoices/{invoiceId}/photo` | Accept the reading; stores it, `200`. Optional JSON body of reviewer corrections |
 | `DELETE` | `/api/invoices/{invoiceId}/photo` | Reject the photo; deletes it, `204` |
 | `GET`  | `/api/config`               | Non-secret settings                      |
 | `GET`  | `/healthz`                  | Liveness                                 |

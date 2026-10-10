@@ -64,6 +64,39 @@ class InvoiceStatusOut(BaseModel):
     documents: list[DocumentOut] = Field(default_factory=list)
 
 
+class DocumentFieldPatch(BaseModel):
+    """A reviewer-corrected value for one field.
+
+    Document Intelligence reads some fields wrong and misses others, so the
+    reviewer is given a chance to fix the reading before it is stored. Only the
+    value matters: the confidence of a reading that has been overwritten by a
+    person is meaningless, so it is not carried here.
+    """
+
+    value: Any = None
+
+
+class DocumentPatch(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    #: Page order, matching the index of the document being corrected.
+    index: int
+    fields: dict[str, DocumentFieldPatch] = Field(default_factory=dict)
+
+
+class InvoiceCorrections(BaseModel):
+    """Values the reviewer entered before accepting a reading.
+
+    Sent on ``POST /api/invoices/{id}/photo`` when the reviewer changed or added
+    fields. The backend merges them over the extracted reading before the record
+    is written, so what is stored is what the reviewer saw and approved. A
+    missing document keeps the extracted values; a field not named keeps its
+    extracted value.
+    """
+
+    documents: list[DocumentPatch] = Field(default_factory=list)
+
+
 class ServiceConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

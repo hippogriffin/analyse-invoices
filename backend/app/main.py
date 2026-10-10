@@ -34,6 +34,7 @@ from app.config import JobStatus, get_settings
 from app.job_state import get_job_state, overlay
 from app.models import (
     InvoiceAccepted,
+    InvoiceCorrections,
     InvoiceStatusOut,
     ServiceConfig,
 )
@@ -41,6 +42,7 @@ from app.repository import (
     MAX_FIELD_CHARS,
     ExtractedDocument,
     ExtractedField,
+    InvoiceRecord,
     dedupe_key,
     delete_record,
     load_record,
@@ -320,7 +322,10 @@ def create_app() -> FastAPI:
         response_model=InvoiceStatusOut,
         summary="Accept the reading, and store the invoice",
     )
-    async def accept_photo(invoice_id: str) -> InvoiceStatusOut:
+    async def accept_photo(
+        invoice_id: str,
+        corrections: InvoiceCorrections | None = None,
+    ) -> InvoiceStatusOut:
         """Keep the values, and only now write the record.
 
         This is the only path in the service that creates rows. The values have
@@ -328,6 +333,11 @@ def create_app() -> FastAPI:
         photo was readable is what makes them worth keeping. Until then the
         result lives in process alone, so nothing here can be read back by
         anyone else.
+
+        ``corrections`` carries the values the reviewer entered for fields that
+        Document Intelligence read wrong or did not return, merged over the
+        extracted reading before the record is written. Omitting it stores the
+        reading as it came out of the model.
         """
         _configured()
         partition = invoice_id.strip()
@@ -336,17 +346,38 @@ def create_app() -> FastAPI:
         record = load_record(settings, partition)
         if held is None and record is None:
             raise HTTPException(status_code=404, detail="Unknown invoice id.")
-        if record is None:
-            if not held.documents:
-                raise HTTPException(
-                    status_code=409,
-                    detail="This invoice has no analysis to accept yet.",
-                )
-            # Reporting a storage failure as a failed analysis would be a lie
-            # about the photo, so it is passed on as the upstream problem it is.
+        if record is None and (held is None or not held.documents):
+            # A failed job has no reading, so there is nothing to accept or
+            # correct, and storing a blank row would be worse than saying so.
+            raise HTTPException(
+                status_code=409,
+                detail="This invoice has no analysis to accept yet.",
+            )
+
+        if corrections is None:
+            # A plain confirmation repeats the existing behaviour: write only the
+            # reading that has not been stored yet, and leave a stored record
+            # alone so a second confirmation is a no-op rather than a rewrite.
+            if record is None:
+                # Reporting a storage failure as a failed analysis would be a lie
+                # about the photo, so it is passed on as the upstream problem it is.
+                try:
+                    save_documents(
+                        settings, partition, held.blob_name, _from_held(held.documents)
+                    )
+                except StorageWriteError as exc:
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+        else:
+            # The reviewer corrected values, so the stored record must reflect
+            # what they approved. That applies whether the reading is still held
+            # or was already stored (and on screen again after a restart).
+            source = _response_documents(held, record)
             try:
                 save_documents(
-                    settings, partition, held.blob_name, _from_held(held.documents)
+                    settings,
+                    partition,
+                    _blob_name(held, record),
+                    _from_held(_apply_corrections(source, corrections)),
                 )
             except StorageWriteError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -386,6 +417,58 @@ def create_app() -> FastAPI:
         return Response(status_code=204)
 
     return app
+
+
+def _response_documents(
+    held: Any, record: InvoiceRecord | None
+) -> list[dict[str, Any]]:
+    """Response-shaped documents for whichever source is current.
+
+    A reading that has not been accepted lives in job state; one that has is in
+    the table. Both are convertible to the same dict shape, so corrections can
+    be applied without caring which source is current.
+    """
+    if held is not None and held.documents:
+        return list(held.documents)
+    if record is not None:
+        return [document.as_dict() for document in record.documents]
+    return []
+
+
+def _blob_name(held: Any, record: InvoiceRecord | None) -> str:
+    """The blob that was analysed, from whichever source is current."""
+    if held is not None and held.blob_name:
+        return held.blob_name
+    if record is not None:
+        return record.blob_name
+    return ""
+
+
+def _apply_corrections(
+    documents: Sequence[dict[str, Any]], corrections: InvoiceCorrections
+) -> list[dict[str, Any]]:
+    """Merge reviewer values over an extracted reading.
+
+    Each corrected document is identified by its index, and only the fields it
+    names are overridden; a field the reviewer cleared becomes an empty value.
+    Anything not mentioned keeps its extracted value, and a correction for a
+    page the model did not return is ignored, so a wrong index can never invent
+    a document.
+    """
+    by_index = {patch.index: patch.fields for patch in corrections.documents}
+    if not by_index:
+        return list(documents)
+    merged: list[dict[str, Any]] = []
+    for document in documents:
+        document = dict(document)
+        patch = by_index.get(document.get("index"))
+        if patch is not None:
+            fields = dict(document.get("fields") or {})
+            for name, field in patch.items():
+                fields[name] = {"value": field.value}
+            document["fields"] = fields
+        merged.append(document)
+    return merged
 
 
 def _from_held(documents: Sequence[dict[str, Any]]) -> list[ExtractedDocument]:

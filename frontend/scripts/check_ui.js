@@ -98,7 +98,7 @@ function makeFetchStub({
     // "/api/invoices/".
     if (/\/api\/invoices\/[^/]+\/photo$/.test(url)) {
       const satisfied = method === "POST";
-      decisions.push({ satisfied, url, method });
+      decisions.push({ satisfied, url, method, body: options.body || null });
       const result =
         (typeof photoDecision === "function" ? photoDecision(satisfied) : photoDecision) || {
           photoSatisfied: satisfied,
@@ -596,12 +596,17 @@ async function captureAndUpload(win) {
     names.join(" | ")
   );
 
-  const values = [...win.document.querySelectorAll(".fields__value")];
-  const merchant = values.find((v) => v.textContent.includes("Acme"));
+  const values = [...win.document.querySelectorAll(".fields__input")];
+  const merchant = values.find((input) => input.value.includes("Acme"));
   check(
     "OCR markup is escaped, not rendered",
-    !!merchant && merchant.querySelector("b") === null && merchant.textContent.includes("Acme <b>Ltd</b>"),
-    merchant ? merchant.innerHTML : "not found"
+    !!merchant && merchant.value === "Acme <b>Ltd</b>",
+    merchant ? merchant.value : "not found"
+  );
+  check(
+    "every value is an editable input",
+    values.length > 0,
+    `${values.length} input(s)`
   );
   const badges = [...win.document.querySelectorAll(".confidence")].map((b) => ({
     text: b.textContent,
@@ -704,6 +709,9 @@ async function captureAndUpload(win) {
       status: g("verdictStatus").textContent,
     };
   };
+  // Values now live in editable inputs, whose contents are not in textContent.
+  const valuesOnScreen = (w) =>
+    [...w.document.querySelectorAll(".fields__input")].map((input) => input.value).join(" | ");
 
   win = buildDom({
     analysisApiBaseUrl: "https://analysis.example",
@@ -775,7 +783,7 @@ async function captureAndUpload(win) {
   await wait(1200);
   check(
     "the values are on screen to be judged",
-    win.document.getElementById("resultsBody").textContent.includes("Acme")
+    valuesOnScreen(win).includes("Acme")
   );
   win.document.getElementById("retakePhoto").click();
   await wait(300);
@@ -792,10 +800,10 @@ async function captureAndUpload(win) {
   check(
     "the rejected values are taken away, not left to be accepted by accident",
     win.document.getElementById("results").hidden === true &&
-      !win.document.getElementById("resultsBody").textContent.includes("Acme"),
+      !valuesOnScreen(win).includes("Acme"),
     JSON.stringify({
       hidden: win.document.getElementById("results").hidden,
-      body: win.document.getElementById("resultsBody").textContent.trim(),
+      body: valuesOnScreen(win).trim(),
     })
   );
   check("and the question goes with them", r.visible === false, JSON.stringify(r));
@@ -982,7 +990,7 @@ async function captureAndUpload(win) {
   await wait(1200);
   check(
     "the values are on screen to be judged",
-    win.document.getElementById("resultsBody").textContent.includes("Acme"),
+    valuesOnScreen(win).includes("Acme"),
     win.document.getElementById("status").textContent
   );
   win.document.getElementById("retakePhoto").click();
@@ -1017,7 +1025,7 @@ async function captureAndUpload(win) {
       said: w.document.getElementById("status").textContent,
       polls: w.__fetchStub.requested.filter((url) => /\/api\/invoices\/inv-123$/.test(url)),
       results: w.document.getElementById("results").hidden,
-      body: w.document.getElementById("resultsBody").textContent,
+      body: valuesOnScreen(w),
     };
   };
 
@@ -1048,6 +1056,113 @@ async function captureAndUpload(win) {
   check("a new photo reads normally", /^Sent\. Reading the invoice/.test(fresh.said), fresh.said);
   check("and its result is fetched", fresh.polls.length > 0, JSON.stringify(fresh.polls));
   check("and shown", fresh.body.includes("Acme"), JSON.stringify(fresh.body));
+
+  console.log("\n--- 20. fixing a wrong or missing value before accepting ---");
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+
+  // Correcting an extracted value withdraws its confidence badge: the score
+  // described the reading, not the value the user just typed.
+  const dateInput = [...win.document.querySelectorAll(".fields__input")]
+    .find((input) => input.value === "2026-03-01");
+  check("an extracted value is an editable input", !!dateInput, valuesOnScreen(win));
+  if (dateInput) {
+    dateInput.value = "2026-04-01";
+    dateInput.dispatchEvent(new win.Event("input"));
+  }
+  check(
+    "editing a value withdraws its confidence badge",
+    !!dateInput &&
+      dateInput.closest(".fields__value").querySelector(".confidence").hidden === true
+  );
+
+  // Adding a field Document Intelligence did not return. COMPLETE_STATUS already
+  // contains VendorName, so InvoiceId is the one that is missing.
+  const addSelect = win.document.querySelector(".fields__add-select");
+  const addInput = win.document.querySelector(".fields__add-input");
+  const addButton = win.document.querySelector(".fields__add-button");
+  check(
+    "the add-a-missing-field control is offered",
+    !!addSelect && !!addInput && !!addButton
+  );
+  addSelect.value = "InvoiceId";
+  addInput.value = "INV-42";
+  addButton.click();
+  await tick();
+  const addedRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "InvoiceId");
+  check("the added field appears", !!addedRow, valuesOnScreen(win));
+  check(
+    "with the value that was typed",
+    !!addedRow && addedRow.querySelector(".fields__input").value === "INV-42"
+  );
+  check(
+    "and the field is not offered for a second add",
+    ![...addSelect.options].some((option) => option.value === "InvoiceId")
+  );
+
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const accepted = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  check(
+    "accepting sends the corrections",
+    !!accepted && accepted.method === "POST" && typeof accepted.body === "string",
+    JSON.stringify(accepted)
+  );
+  let payload = {};
+  try {
+    payload = JSON.parse(accepted.body);
+  } catch {
+    // Reported by the check below.
+  }
+  const correctedFields = ((payload.documents || [])[0] || {}).fields || {};
+  check(
+    "the corrections include the added value",
+    !!correctedFields.InvoiceId && correctedFields.InvoiceId.value === "INV-42",
+    JSON.stringify(correctedFields)
+  );
+  check(
+    "and the edited value",
+    !!correctedFields.InvoiceDate && correctedFields.InvoiceDate.value === "2026-04-01",
+    JSON.stringify(correctedFields)
+  );
+
+  // Removing an added field takes it back out of the corrections.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+  const s2 = win.document.querySelector(".fields__add-select");
+  s2.value = "InvoiceId";
+  win.document.querySelector(".fields__add-input").value = "INV-99";
+  win.document.querySelector(".fields__add-button").click();
+  await tick();
+  const removedRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "InvoiceId");
+  removedRow.querySelector(".fields__remove").click();
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const afterRemove = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let removedPayload = {};
+  try {
+    removedPayload = JSON.parse(afterRemove.body);
+  } catch {
+    // Reported by the check below.
+  }
+  const remaining = ((removedPayload.documents || [])[0] || {}).fields || {};
+  check(
+    "a removed field is left out of the corrections",
+    !remaining.InvoiceId,
+    JSON.stringify(remaining)
+  );
 
   console.log(failures.length ? `\n${failures.length} FAILURE(S)` : "\nAll checks passed.");
   process.exit(failures.length ? 1 : 0);
