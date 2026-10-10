@@ -1164,6 +1164,62 @@ async function captureAndUpload(win) {
     JSON.stringify(remaining)
   );
 
+  console.log("\n--- 21. the same editing works for an uploaded photo ---");
+  // The upload path must offer exactly the same correction controls as the
+  // camera path: both reach the same review screen, so there is no reason for
+  // an uploaded invoice to be fixed by hand and a photographed one not.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await chooseMode(win, "upload");
+  await pickFile(win);
+  await wait(300); // the preview renders, then Upload is reachable
+  win.document.getElementById("upload").click();
+  await wait(1200);
+
+  const inputs = win.document.querySelectorAll(".fields__input");
+  check(
+    "an uploaded photo's fields are editable too",
+    inputs.length > 0,
+    valuesOnScreen(win)
+  );
+  check(
+    "and its missing fields can be added",
+    !!win.document.querySelector(".fields__add-select"),
+    valuesOnScreen(win)
+  );
+
+  [...inputs].find((input) => input.value === "2026-03-01").value = "2026-05-05";
+  [...inputs].find((input) => input.value === "2026-05-05")
+    .dispatchEvent(new win.Event("input"));
+  const uploadAddSelect = win.document.querySelector(".fields__add-select");
+  uploadAddSelect.value = "InvoiceId";
+  win.document.querySelector(".fields__add-input").value = "INV-77";
+  win.document.querySelector(".fields__add-button").click();
+  await tick();
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const uploadDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let uploadPayload = {};
+  try {
+    uploadPayload = JSON.parse(uploadDecision.body);
+  } catch {
+    // Reported by the check below.
+  }
+  const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
+  check(
+    "accepting an uploaded photo sends its corrections",
+    uploadFields.InvoiceId && uploadFields.InvoiceId.value === "INV-77",
+    JSON.stringify(uploadFields)
+  );
+  check(
+    "including the edited value",
+    uploadFields.InvoiceDate && uploadFields.InvoiceDate.value === "2026-05-05",
+    JSON.stringify(uploadFields)
+  );
+
   console.log(failures.length ? `\n${failures.length} FAILURE(S)` : "\nAll checks passed.");
   process.exit(failures.length ? 1 : 0);
 })();
