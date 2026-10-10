@@ -3,17 +3,20 @@ name = "invoice-upload"
 version = "0.1.0"
 description = "Browser camera capture UI that hands photos to the invoice analysis backend"
 requires-python = ">=3.11"
-# No Azure SDK here on purpose: this service serves pages only. Storage and
-# Document Intelligence are the backend's job, so no credentials live here.
+# No Azure SDK here on purpose: this service serves pages and forwards HTTP.
+# Storage and Document Intelligence are the backend's job, so no credentials
+# live here. httpx carries the proxied requests; python-multipart parses the
+# photo that arrives before it is handed on.
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "python-multipart>=0.0.18",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "httpx>=0.27",
     "pytest>=8.3",
 ]
 

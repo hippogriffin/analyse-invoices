@@ -197,8 +197,12 @@ def test_results_panel_starts_hidden():
     assert "hidden" in results.group(0), "results panel must start hidden"
 
 
-def test_photo_is_posted_straight_to_the_backend():
-    """The UI holds no storage, so one POST to the backend is the whole flow.
+def test_photo_is_posted_to_the_frontends_own_origin():
+    """The UI holds no storage and no backend address: it posts to itself.
+
+    A Kubernetes service name is not resolvable from the browser, so the browser
+    must never be handed the backend's address. It posts to this service's own
+    origin, and the server forwards to the backend.
 
     The old design uploaded to itself first and then handed on a blob name.
     That split is what put a storage key in the browser-facing service.
@@ -206,13 +210,14 @@ def test_photo_is_posted_straight_to_the_backend():
     upload = re.search(r"function uploadPhoto\(\)\s*\{.*?\n  \}", APP_JS, re.S)
     assert upload, "uploadPhoto not found"
     body = upload.group(0)
-    assert re.search(
-        r'request\.open\("POST", `\$\{state\.analysisApiBaseUrl\}/api/invoices`\)', body
-    ), (
-        "uploadPhoto() must post the file to the backend's /api/invoices, since "
-        "the backend is what stores it"
+    assert re.search(r'request\.open\("POST", "/api/invoices"\)', body), (
+        "uploadPhoto() must post the file to this service's same-origin "
+        "/api/invoices, which forwards it to the backend"
     )
     assert 'form.append("photo"' in body, "the file must be sent as multipart form data"
+    assert "analysisApiBaseUrl" not in APP_JS, (
+        "the browser must not know the backend's address; the server forwards on"
+    )
     assert "/api/upload" not in APP_JS, (
         "the old self-upload endpoint is gone; nothing here should reference it"
     )
@@ -257,7 +262,7 @@ def test_poll_starts_from_the_returned_invoice_id():
     assert "accepted.invoiceId" in body, (
         "the invoice id must be the one the backend returned"
     )
-    assert "pollAnalysis(state.analysisApiBaseUrl, invoiceId, run)" in body, (
+    assert "pollAnalysis(invoiceId, run)" in body, (
         "polling must start with the id the backend returned"
     )
 

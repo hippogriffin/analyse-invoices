@@ -46,7 +46,6 @@
     photo: null,
     photoUrl: null,
     mirror: false,
-    analysisApiBaseUrl: "",
     analysisConfigured: false,
     maxUploadBytes: 0,
     allowedContentTypes: [],
@@ -177,13 +176,18 @@
     return startCamera({ waitScreen: true });
   }
 
-  /** Reads the service settings, including where the photo should be posted. */
+  /**
+   * Reads the service settings.
+   *
+   * The analysis backend's address is deliberately absent: the browser posts to
+   * this page's own origin, and this service forwards to the backend, so the
+   * browser never needs to know (or be able to resolve) where it lives.
+   */
   async function loadConfig() {
     try {
       const response = await fetch("/api/config");
       if (!response.ok) return;
       const config = await response.json();
-      state.analysisApiBaseUrl = (config.analysisApiBaseUrl || "").replace(/\/+$/, "");
       state.analysisConfigured = Boolean(config.analysisConfigured);
       state.maxUploadBytes = Number(config.maxUploadBytes) || 0;
       state.allowedContentTypes = (config.allowedContentTypes || []).map((type) =>
@@ -445,9 +449,10 @@
     form.append("photo", state.photo, state.photo.name || "invoice.jpg");
 
     // XHR rather than fetch: upload progress events are needed for the bar, and
-    // a large photo should not be buffered into a second copy to send it.
+    // a large photo should not be buffered into a second copy to send it. The
+    // path is same-origin: this service forwards it to the analysis backend.
     const request = new XMLHttpRequest();
-    request.open("POST", `${state.analysisApiBaseUrl}/api/invoices`);
+    request.open("POST", "/api/invoices");
 
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {
@@ -489,7 +494,7 @@
         return;
       }
       setStatus("Sent. Reading the invoice…", "success");
-      pollAnalysis(state.analysisApiBaseUrl, invoiceId, run);
+      pollAnalysis(invoiceId, run);
     });
 
     request.addEventListener("error", () => {
@@ -513,7 +518,7 @@
 
   /* ---------------------------------------------------------------- analysis */
 
-  async function pollAnalysis(base, invoiceId, run) {
+  async function pollAnalysis(invoiceId, run) {
     const deadline = Date.now() + ANALYSIS_DEADLINE_MS;
     let delay = POLL_MIN_MS;
     showResults({ view: "pending", message: "The service is reading the invoice." });
@@ -525,7 +530,7 @@
 
       let response;
       try {
-        response = await fetch(`${base}/api/invoices/${invoiceId}`);
+        response = await fetch(`/api/invoices/${invoiceId}`);
       } catch {
         // A dropped poll is not a failed analysis; keep trying until the deadline.
         continue;
@@ -680,10 +685,9 @@
       : "Getting the camera ready...";
 
     try {
-      const response = await fetch(
-        `${state.analysisApiBaseUrl}/api/invoices/${invoiceId}/photo`,
-        { method: satisfied ? "POST" : "DELETE" }
-      );
+      const response = await fetch(`/api/invoices/${invoiceId}/photo`, {
+        method: satisfied ? "POST" : "DELETE",
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(body.detail || `HTTP ${response.status}`);

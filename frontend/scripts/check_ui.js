@@ -385,9 +385,9 @@ async function captureAndUpload(win) {
   win.document.getElementById("upload").click();
   await tick();
   check(
-    "the file was posted to the backend",
+    "the file was posted to the frontend's own origin",
     win.__xhrPosts.length === 1 &&
-      win.__xhrPosts[0].url === "https://analysis.example/api/invoices" &&
+      win.__xhrPosts[0].url === "/api/invoices" &&
       win.__xhrPosts[0].method === "POST",
     JSON.stringify(win.__xhrPosts.map((p) => `${p.method} ${p.url}`))
   );
@@ -556,9 +556,9 @@ async function captureAndUpload(win) {
     win.document.getElementById("resultsTitle").textContent
   );
   check(
-    "the photo went to the backend in one request",
+    "the photo went to the frontend in one request",
     win.__xhrPosts.length === 1 &&
-      win.__xhrPosts[0].url === "https://analysis.example/api/invoices",
+      win.__xhrPosts[0].url === "/api/invoices",
     JSON.stringify(win.__xhrPosts.map((p) => `${p.method} ${p.url}`))
   );
   check(
@@ -740,8 +740,7 @@ async function captureAndUpload(win) {
     "saying yes posts to the photo resource",
     win.__fetchStub.decisions.length === 1 &&
       win.__fetchStub.decisions[0].method === "POST" &&
-      win.__fetchStub.decisions[0].url ===
-        "https://analysis.example/api/invoices/inv-123/photo",
+      win.__fetchStub.decisions[0].url === "/api/invoices/inv-123/photo",
     JSON.stringify(win.__fetchStub.decisions)
   );
   check(
