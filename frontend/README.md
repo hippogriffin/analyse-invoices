@@ -87,10 +87,11 @@ node scripts/check_ui.js
 It walks the whole flow (load → choose → capture/pick → submit → results, plus a
 denied-permission case and a rejected submission) and asserts what is on screen
 at each step. It also covers the analysis panel: results appearing while
-analysis runs, field labels and confidence badges, the failure state, the
-keep-or-discard question in each of its states, stale polling being cancelled by
-a retake, and submission being refused when no backend is configured. The script
-prints `SKIP` if jsdom is not installed, so it is safe to call in a pipeline.
+analysis runs, field labels and confidence badges, editing a value and adding a
+missing field before accepting, the failure state, the keep-or-discard question
+in each of its states, stale polling being cancelled by a retake, and submission
+being refused when no backend is configured. The script prints `SKIP` if jsdom
+is not installed, so it is safe to call in a pipeline.
 
 ### Testing the camera on a desktop
 
@@ -137,8 +138,9 @@ Two details worth knowing if you change this flow:
 
 - Polling is cancelled when a new photo is taken, so results for an old photo
   cannot overwrite new ones.
-- Extracted values are inserted with `textContent`, never `innerHTML`. OCR
-  output is untrusted input; `tests/test_frontend.py` guards this.
+- Extracted values are assigned to editable inputs with `.value`, never
+  `innerHTML`. OCR output is untrusted input; `tests/test_frontend.py` guards
+  this, and the review screen can correct or add values before accepting.
 
 ### Confidence, and the keep-the-photo question
 
@@ -152,10 +154,23 @@ are still there but the badges are absent — the UI omits them rather than show
 a stale number. A field with no confidence is rendered without a badge either
 way.
 
+### Correcting a reading
+
+Document Intelligence reads some fields wrong and misses others — a merchant is
+a common omission. Every value is therefore an editable input, and each invoice
+offers an **Add a missing field** control listing the fields the model can return
+but did not. Editing a value withdraws its confidence badge, because the score
+described the automatic reading, not what the reviewer typed.
+
+The corrections travel with the **Yes, it is readable** answer as a JSON body on
+`POST /api/invoices/{id}/photo`, and the backend merges them over the extracted
+reading before writing the record. A plain confirmation, with nothing changed,
+sends no body and stores the reading exactly as Document Intelligence returned it.
+
 Once the fields are on screen, the app asks whether the photo was good enough:
 
-- **Yes, it is readable** accepts the reading, and that is what makes the backend
-  write the record.
+- **Yes, it is readable** accepts the reading, including any corrections, and
+  that is what makes the backend write the record.
 - **No, retake it** throws the reading away and immediately starts a new photo.
 
 The choice is not a note about the photo — it decides whether the invoice is

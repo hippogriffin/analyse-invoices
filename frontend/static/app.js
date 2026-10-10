@@ -57,6 +57,9 @@
     // The invoice currently on screen, and its keep/discard decision.
     invoiceId: "",
     photoSatisfied: null,
+    // Becomes true when the reviewer changes, adds or removes any field value,
+    // so that accepting sends those corrections instead of a plain confirmation.
+    edited: false,
   };
 
   // Analysis usually finishes within a few seconds, but the free tier can be
@@ -684,10 +687,17 @@
       ? "Saving..."
       : "Getting the camera ready...";
 
+    const options = { method: satisfied ? "POST" : "DELETE" };
+    if (satisfied && state.edited) {
+      // The reviewer changed values, so the record must store what they
+      // approved, not the original reading. A plain accept sends no body and
+      // the stored extraction is kept as it is.
+      options.headers = { "content-type": "application/json" };
+      options.body = JSON.stringify(collectCorrections());
+    }
+
     try {
-      const response = await fetch(`/api/invoices/${invoiceId}/photo`, {
-        method: satisfied ? "POST" : "DELETE",
-      });
+      const response = await fetch(`/api/invoices/${invoiceId}/photo`, options);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(body.detail || `HTTP ${response.status}`);
@@ -729,6 +739,8 @@
     els.resultsMessage.textContent = message || "";
     els.resultsMessage.hidden = !message;
     els.resultsBody.replaceChildren();
+    // A fresh render starts from the extracted values with no edits.
+    state.edited = false;
     (documents || []).forEach((document_, index) => {
       els.resultsBody.appendChild(renderDocument(document_, index, documents.length));
     });
@@ -753,12 +765,16 @@
   function hideResults() {
     els.results.hidden = true;
     els.resultsBody.replaceChildren();
+    state.edited = false;
     hideVerdict();
   }
 
   function renderDocument(document_, index, total) {
     const section = document.createElement("section");
     section.className = "results__document";
+    // The page index the reviewer's corrections are matched on. This comes from
+    // the model, not from the on-screen position, in case the two ever differ.
+    section.dataset.index = Number.isInteger(document_.index) ? document_.index : index;
 
     const heading = document.createElement("h3");
     heading.className = "results__document-title";
@@ -771,38 +787,150 @@
     const fields = Object.entries(document_.fields || {}).filter(
       ([, field]) => field && field.value !== "" && field.value !== null && field.value !== undefined
     );
-    if (!fields.length) {
-      const empty = document.createElement("p");
-      empty.className = "results__message";
-      empty.textContent = "No fields were extracted from this invoice.";
-      section.appendChild(empty);
-      return section;
-    }
 
     const list = document.createElement("dl");
     list.className = "fields";
     sortFields(fields).forEach(([name, field]) => {
-      const row = document.createElement("div");
-      row.className = "fields__row";
-
-      const term = document.createElement("dt");
-      term.className = "fields__name";
-      term.textContent = fieldLabel(name);
-
-      // Built with textContent, never innerHTML: these are OCR values and are
-      // not trusted input.
-      const value = document.createElement("dd");
-      value.className = "fields__value";
-      value.textContent = String(field.value);
-      if (typeof field.confidence === "number") {
-        value.appendChild(confidenceBadge(field.confidence));
-      }
-
-      row.append(term, value);
-      list.appendChild(row);
+      list.appendChild(renderFieldRow(name, field, false));
     });
     section.appendChild(list);
+    // The reviewer is always offered the chance to fill fields Document
+    // Intelligence did not return, even when some were extracted.
+    section.appendChild(buildAddFieldControl(list));
     return section;
+  }
+
+  /**
+   * One editable field row. The Extract value is shown in an input so a wrong
+   * reading can be corrected, and the confidence badge is withdrawn once the
+   * person overrides it: a score for automatic reading says nothing about a
+   * value a person just typed.
+   */
+  function renderFieldRow(name, field, removable) {
+    const row = document.createElement("div");
+    row.className = "fields__row";
+    row.dataset.field = name;
+
+    const term = document.createElement("dt");
+    term.className = "fields__name";
+    term.textContent = fieldLabel(name);
+
+    const value = document.createElement("dd");
+    value.className = "fields__value";
+
+    // Assigned through .value, never as markup: OCR output is untrusted input.
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "fields__input";
+    input.setAttribute("aria-label", fieldLabel(name));
+    input.value = String(field.value);
+    input.addEventListener("input", () => {
+      state.edited = true;
+      const badge = value.querySelector(".confidence");
+      if (badge) badge.hidden = true;
+    });
+    value.appendChild(input);
+
+    if (typeof field.confidence === "number") {
+      value.appendChild(confidenceBadge(field.confidence));
+    }
+
+    if (removable) {
+      // Only a field the reviewer added goes away with its row; an extracted
+      // field can be corrected by editing (or clearing) its value.
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "fields__remove";
+      remove.textContent = "Remove";
+      remove.setAttribute("aria-label", `Remove ${fieldLabel(name)}`);
+      remove.addEventListener("click", () => {
+        row.remove();
+        state.edited = true;
+      });
+      value.appendChild(remove);
+    }
+
+    row.append(term, value);
+    return row;
+  }
+
+  /** The per-document control for adding a field Document Intelligence missed. */
+  function buildAddFieldControl(list) {
+    const present = new Set(
+      [...list.querySelectorAll(".fields__row")].map((row) => row.dataset.field)
+    );
+
+    const control = document.createElement("div");
+    control.className = "fields__add";
+
+    const select = document.createElement("select");
+    select.className = "fields__add-select";
+    select.setAttribute("aria-label", "Field to add");
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Add a missing field…";
+    placeholder.selected = true;
+    placeholder.disabled = true;
+    select.appendChild(placeholder);
+    Object.entries(FIELD_LABELS).forEach(([name, label]) => {
+      if (present.has(name)) return;
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+
+    const value = document.createElement("input");
+    value.type = "text";
+    value.className = "fields__add-input";
+    value.placeholder = "Value";
+    value.setAttribute("aria-label", "Value for the added field");
+
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "fields__add-button";
+    addButton.textContent = "Add field";
+
+    const add = () => {
+      const name = select.value;
+      if (!name) {
+        setStatus("Choose a field to add first.", "error");
+        return;
+      }
+      list.appendChild(renderFieldRow(name, { value: value.value, confidence: null }, true));
+      // The field now exists in this document, so it is not offered again.
+      select.remove(select.selectedIndex);
+      select.value = "";
+      value.value = "";
+      state.edited = true;
+    };
+
+    addButton.addEventListener("click", add);
+    value.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") add();
+    });
+
+    control.append(select, value, addButton);
+    return control;
+  }
+
+  /**
+   * The values the reviewer changed or added, in the shape the backend merges
+   * over the extracted reading when the photo is accepted. Present rows and
+   * added rows are both included; a removed added row is simply absent.
+   */
+  function collectCorrections() {
+    const documents = [];
+    els.resultsBody.querySelectorAll(".results__document").forEach((section) => {
+      const fields = {};
+      section.querySelectorAll(".fields__row").forEach((row) => {
+        const input = row.querySelector(".fields__input");
+        if (!input) return;
+        fields[row.dataset.field] = { value: input.value };
+      });
+      documents.push({ index: Number(section.dataset.index), fields });
+    });
+    return { documents };
   }
 
   function confidenceBadge(confidence) {

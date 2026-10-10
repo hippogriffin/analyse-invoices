@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.config import get_settings
@@ -58,11 +58,15 @@ async def _forward(
     path: str,
     *,
     files: dict | None = None,
+    content: bytes | None = None,
+    headers: dict[str, str] | None = None,
 ) -> Response:
     """Send one request to the backend and hand its answer back unchanged."""
     try:
         async with httpx.AsyncClient(timeout=PROXY_TIMEOUT) as client:
-            upstream = await client.request(method, _target(path), files=files)
+            upstream = await client.request(
+                method, _target(path), files=files, content=content, headers=headers
+            )
     except httpx.HTTPError as exc:
         # A backend that cannot be reached is a gateway problem, not a bad
         # request: 502 tells the UI the photo may be retried rather than
@@ -129,8 +133,18 @@ async def status(invoice_id: str) -> Response:
 
 
 @router.post("/{invoice_id}/photo", summary="Accept the reading")
-async def accept_photo(invoice_id: str) -> Response:
-    return await _forward("POST", f"/api/invoices/{invoice_id}/photo")
+async def accept_photo(invoice_id: str, request: Request) -> Response:
+    """Accept the reading, forwarding any reviewer values unchanged.
+
+    The browser sends the values the reviewer changed or added as a JSON body
+    when the reading was edited. This is forwarded byte for byte: this process
+    does not interpret the corrections, so it only has to copy them across.
+    """
+    content = (await request.body()) or None
+    headers = {"content-type": request.headers.get("content-type")} if content else None
+    return await _forward(
+        "POST", f"/api/invoices/{invoice_id}/photo", content=content, headers=headers
+    )
 
 
 @router.delete("/{invoice_id}/photo", summary="Reject the photo")

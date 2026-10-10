@@ -300,17 +300,75 @@ def test_extracted_values_are_never_inserted_as_html():
     A field value containing markup must be rendered as text. Using innerHTML
     or insertAdjacentHTML with a value would make this a stored XSS sink.
     """
+    functions = {}
+    for name in ("renderDocument", "renderFieldRow"):
+        match = re.search(rf"function {name}\(.*?\n  \}}", APP_JS, re.S)
+        assert match, f"{name} not found"
+        # Comments are stripped first, so prose mentioning a sink cannot mask it.
+        code = re.sub(r"/\*.*?\*/", "", match.group(0), flags=re.S)
+        code = re.sub(r"//[^\n]*", "", code)
+        functions[name] = code
+    for name, code in functions.items():
+        for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+            assert forbidden not in code, (
+                f"{name}() must not use {forbidden} with extracted field values"
+            )
+    assert "input.value = String(field.value)" in functions["renderFieldRow"], (
+        "field values must be assigned to the editable input with .value"
+    )
+
+
+def test_every_field_is_editable_and_missing_ones_can_be_added():
+    """Some readings are wrong or incomplete, so the reviewer can fix them.
+
+    Each value is an input, and each document offers a way to add a field
+    Document Intelligence did not return, such as a missing merchant.
+    """
     render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
     assert render, "renderDocument not found"
-    # Comments are stripped first, so prose mentioning a sink cannot mask it.
-    code = re.sub(r"/\*.*?\*/", "", render.group(0), flags=re.S)
-    code = re.sub(r"//[^\n]*", "", code)
-    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
-        assert forbidden not in code, (
-            f"renderDocument() must not use {forbidden} with extracted field values"
-        )
-    assert "value.textContent = String(field.value)" in code, (
-        "field values must be assigned with textContent"
+    assert "renderFieldRow(" in render.group(0), (
+        "each extracted field must render through the editable row builder"
+    )
+    assert "buildAddFieldControl(" in render.group(0), (
+        "each document must offer the add-a-missing-field control"
+    )
+    row = re.search(r"function renderFieldRow\(.*?\n  \}", APP_JS, re.S)
+    assert row, "renderFieldRow not found"
+    assert 'document.createElement("input")' in row.group(0), (
+        "field values must be editable inputs"
+    )
+    add = re.search(r"function buildAddFieldControl\(.*?\n  \}", APP_JS, re.S)
+    assert add, "buildAddFieldControl not found"
+    assert "Object.entries(FIELD_LABELS)" in add.group(0), (
+        "the add control must offer the known invoice fields"
+    )
+    # Added fields are removable; extracted ones are corrected instead.
+    assert 'row.className = "fields__row"' in row.group(0)
+    assert "row.dataset.field = name" in row.group(0), (
+        "each row must record its field name for the corrections payload"
+    )
+
+
+def test_corrections_are_sent_only_when_the_reviewer_changed_something():
+    """A plain accept is unchanged; an edited one carries the corrections.
+
+    Sending a body on an untouched reading would turn a no-op repeat
+    confirmation into a rewrite, so the DOM is only read once it is dirty.
+    """
+    send = re.search(r"async function sendVerdict\(.*?\n  \}", APP_JS, re.S)
+    assert send, "sendVerdict not found"
+    body = send.group(0)
+    assert "state.edited" in body, "the edited flag must gate the corrections"
+    assert "JSON.stringify(collectCorrections())" in body, (
+        "the edited values must be sent as the request body"
+    )
+    collect = re.search(r"function collectCorrections\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert collect, "collectCorrections not found"
+    assert ".fields__input" in collect.group(0), (
+        "the corrections must be read from the editable inputs"
+    )
+    assert "section.dataset.index" in collect.group(0), (
+        "each corrected document must carry its page index"
     )
 
 

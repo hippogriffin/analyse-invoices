@@ -174,8 +174,10 @@ class _RecordingClient:
     async def __aexit__(self, *exc_info) -> bool:
         return False
 
-    async def request(self, method, url, files=None):
-        type(self).calls.append({"method": method, "url": url, "files": files})
+    async def request(self, method, url, files=None, content=None, headers=None):
+        type(self).calls.append(
+            {"method": method, "url": url, "files": files, "content": content, "headers": headers}
+        )
         return httpx.Response(
             type(self).status_code,
             json=type(self).body,
@@ -220,6 +222,36 @@ def test_status_and_verdict_calls_are_forwarded(client: TestClient, recorded_bac
         ("POST", f"{BACKEND}/api/invoices/inv-1/photo"),
         ("DELETE", f"{BACKEND}/api/invoices/inv-1/photo"),
     ]
+
+
+def test_reviewer_values_on_accept_are_forwarded_unchanged(
+    client: TestClient, recorded_backend
+):
+    """The proxy copies the corrections body across without reading it.
+
+    The browser posts the fields the reviewer changed or added as JSON; this
+    service forwards the bytes verbatim so the backend is the only place that
+    interprets them.
+    """
+    payload = b'{"documents":[{"index":0,"fields":{"VendorName":{"value":"Acme"}}}]}'
+    response = client.post(
+        "/api/invoices/inv-1/photo",
+        content=payload,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    call = recorded_backend.calls[-1]
+    assert call["method"] == "POST"
+    assert call["url"] == f"{BACKEND}/api/invoices/inv-1/photo"
+    assert call["content"] == payload
+    assert call["headers"]["content-type"] == "application/json"
+
+    # A plain accept still forwards no body at all, not an empty one.
+    recorded_backend.calls = []
+    client.post("/api/invoices/inv-2/photo")
+    assert recorded_backend.calls[-1]["content"] is None
+    assert recorded_backend.calls[-1]["headers"] is None
 
 
 def test_the_backends_status_and_body_are_passed_back(

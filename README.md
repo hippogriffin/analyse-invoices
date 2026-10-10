@@ -47,7 +47,9 @@ chosen photo over the network, so it holds no credentials of any kind.
 6. **The record is created only on "Yes, it is readable"**, which is the single
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
-   somebody has rejected is never stored.
+   somebody has rejected is never stored. Before confirming, the reviewer can
+   correct any value and add fields Document Intelligence did not return; those
+   corrections travel with the "Yes" and are what gets stored.
 7. The photo is deleted from blob storage as soon as it has been read, whether
    the analysis succeeded, failed or was rejected.
 
