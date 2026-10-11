@@ -365,7 +365,7 @@ def create_app() -> FastAPI:
             # alone so a second confirmation is a no-op rather than a rewrite.
             if record is None:
                 source = _response_documents(held, None)
-                _require_merchant(source)
+                _require_required_fields(source)
                 storable = _from_held(source)
             else:
                 storable = None
@@ -376,7 +376,7 @@ def create_app() -> FastAPI:
             source = _response_documents(held, record)
             merged = _apply_corrections(source, corrections)
             storable = _from_held(merged)
-            _require_merchant(merged)
+            _require_required_fields(merged)
         if storable is not None:
             try:
                 save_documents(settings, partition, _blob_name(held, record), storable)
@@ -453,29 +453,47 @@ def _without_dropped_fields(
     return cleaned
 
 
-REQUIRED_FIELDS = frozenset({"VendorName"})
+# Fields that must end up in every stored record. Order matters for the error
+# message, so a document missing several is told about the first one, the way
+# the UI prompts.
+REQUIRED_FIELDS = ("VendorName", "DueDate", "InvoiceTotal", "SubTotal", "TotalTax")
+
+# How each required field is named to a person, matching the frontend labels.
+REQUIRED_FIELD_LABELS = {
+    "VendorName": "merchant",
+    "DueDate": "date",
+    "InvoiceTotal": "invoice total",
+    "SubTotal": "subtotal",
+    "TotalTax": "total tax",
+}
 
 
-def _require_merchant(documents: list[dict[str, Any]]) -> None:
-    """Refuse to write a document that has no merchant.
+def _require_required_fields(documents: list[dict[str, Any]]) -> None:
+    """Refuse to write a document missing a required field.
 
-    The reviewer is asked for a merchant until one is read or typed, so a record
-    reaching the table always has one. This guard is the last line of that rule:
-    a document the model read no merchant from, or whose merchant a correction
-    cleared, is rejected rather than stored as a blank.
+    The reviewer is asked for a merchant, a date, the invoice total, the
+    subtotal and the total tax until all are read or typed, so a record
+    reaching the table always has them. This guard is the last line of that
+    rule: a document the model read none from, or whose required value a
+    correction cleared, is rejected rather than stored as a blank.
     """
     for position, document in enumerate(documents):
         fields = document.get("fields") or {}
-        missing = any(
-            not str((fields.get(name) or {}).get("value") or "").strip()
-            for name in REQUIRED_FIELDS
+        missing = next(
+            (
+                name
+                for name in REQUIRED_FIELDS
+                if not str((fields.get(name) or {}).get("value") or "").strip()
+            ),
+            None,
         )
-        if missing:
+        if missing is not None:
+            label = REQUIRED_FIELD_LABELS[missing]
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Document {position} has no merchant (VendorName). "
-                    "Correct it before accepting: a merchant is required."
+                    f"Document {position} has no {label} ({missing}). "
+                    f"Correct it before accepting: a {label} is required."
                 ),
             )
 

@@ -38,7 +38,10 @@ def stub_azure(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
                 confidence=0.98,
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("DueDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
+                    ExtractedField("TotalTax", "10.00 EUR", 0.9),
                 ],
             )
         ],
@@ -363,17 +366,6 @@ class TestAPhotoVerdict:
         assert row["f_VendorName"] == "Fixed"
         assert row["f_InvoiceTotal"] == "120.00 EUR"
 
-    def test_a_cleared_field_is_stored_empty(
-        self, client, stub_azure, table
-    ) -> None:
-        """A reviewer who blanks a misread field can make it disappear too."""
-        post_photo(client)
-        client.post(
-            f"/api/invoices/{PARTITION}/photo",
-            json={"documents": [{"index": 0, "fields": {"InvoiceTotal": {"value": ""}}}]},
-        )
-        assert table.entities[(PARTITION, "doc-000")]["f_InvoiceTotal"] == ""
-
     def test_corrections_update_an_already_stored_record(
         self, client, stub_azure, table
     ) -> None:
@@ -425,12 +417,13 @@ class TestAPhotoVerdict:
 
 
 class TestADroppedField:
-    """PreviousUnpaidBalance is kept nowhere, by nobody.
+    """Dropped fields are kept nowhere, by nobody.
 
-    Some invoices carry a previous balance that no reviewer is supposed to
-    confirm. The UI never offers it, and the backend filters it at every point a
-    value could enter or leave, so the field cannot be shown, stored or smuggled
-    back in through a correction.
+    Some invoice values there is nothing trustworthy left to do with — a
+    previous balance, or the amount due — so no reviewer is supposed to
+    confirm them. The UI never offers them, and the backend filters each at
+    every point a value could enter or leave, so the field cannot be shown,
+    stored or smuggled back in through a correction.
     """
 
     def test_a_dropped_field_never_reaches_the_response(
@@ -442,6 +435,7 @@ class TestADroppedField:
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
                     ExtractedField("PreviousUnpaidBalance", "50.00 EUR", 0.9),
+                    ExtractedField("AmountDue", "120.00 EUR", 0.6),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                 ],
             )
@@ -450,6 +444,7 @@ class TestADroppedField:
         body = client.get(f"/api/invoices/{PARTITION}").json()
         names = body["documents"][0]["fields"].keys()
         assert "PreviousUnpaidBalance" not in names
+        assert "AmountDue" not in names
         assert set(names) == {"VendorName", "InvoiceTotal"}
 
     def test_a_dropped_field_is_not_stored_on_accept(
@@ -465,6 +460,7 @@ class TestADroppedField:
                         "fields": {
                             "VendorName": {"value": "Renamed"},
                             "PreviousUnpaidBalance": {"value": "1.00 EUR"},
+                            "AmountDue": {"value": "2.00 EUR"},
                         },
                     }
                 ]
@@ -474,6 +470,7 @@ class TestADroppedField:
         row = table.entities[(PARTITION, "doc-000")]
         assert row["f_VendorName"] == "Renamed"
         assert not [name for name in row if name.startswith("f_PreviousUnpaidBalance")]
+        assert not [name for name in row if name.startswith("f_AmountDue")]
 
     def test_a_stored_dropped_field_is_filtered_from_the_response(
         self, client, settings, table
@@ -552,7 +549,12 @@ class TestAMerchantIsRequired:
         stub_azure["documents"] = [
             ExtractedDocument(
                 index=0,
-                fields=[ExtractedField("InvoiceTotal", "120.00 EUR", 0.95)],
+                fields=[
+                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
+                    ExtractedField("TotalTax", "10.00 EUR", 0.9),
+                ],
             )
         ]
         post_photo(client)
@@ -567,6 +569,86 @@ class TestAMerchantIsRequired:
         assert response.status_code == 200
         row = table.entities[(PARTITION, "doc-000")]
         assert row["f_VendorName"] == "Acme"
+
+
+class TestTotalTaxIsRequired:
+    """The record must have a total tax before it is written, like the merchant.
+
+    The total tax is part of what the reviewer confirms, so a document rejected
+    for a missing or cleared total tax is refused with 422, and a reviewer who
+    types one gets the record written. The UI shows the empty row and blocks the
+    button; these tests guard the same rule at the only point that writes the
+    table.
+    """
+
+    def test_a_document_read_without_a_total_tax_cannot_be_stored(
+        self, client, stub_azure, table
+    ) -> None:
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[
+                    ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
+                ],
+            )
+        ]
+        post_photo(client)
+        assert client.get(f"/api/invoices/{PARTITION}").status_code == 200
+        response = client.post(f"/api/invoices/{PARTITION}/photo")
+        assert response.status_code == 422
+        assert "total tax" in response.json()["detail"]
+        assert table.entities == {}
+
+    def test_a_correction_that_clears_the_total_tax_cannot_be_stored(
+        self, client, stub_azure, table
+    ) -> None:
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {"index": 0, "fields": {"TotalTax": {"value": ""}}}
+                ]
+            },
+        )
+        assert response.status_code == 422
+        assert "total tax" in response.json()["detail"]
+        assert table.entities == {}
+
+    def test_a_stored_record_needing_a_reviewer_total_tax_still_won(
+        self, client, stub_azure, table
+    ) -> None:
+        """Supplying the total tax to a document that had none stores the record.
+
+        The reviewer can type the total tax Document Intelligence misses, and
+        that is what the table keeps; the missing reading is not a dead end.
+        """
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[
+                    ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
+                ],
+            )
+        ]
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {"index": 0, "fields": {"TotalTax": {"value": "12.50"}}}
+                ]
+            },
+        )
+        assert response.status_code == 200
+        row = table.entities[(PARTITION, "doc-000")]
+        assert row["f_TotalTax"] == "12.50"
 
 
 def test_a_repeated_photo_says_so(client, stub_azure) -> None:

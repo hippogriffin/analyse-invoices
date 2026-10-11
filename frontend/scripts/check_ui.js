@@ -59,12 +59,13 @@ const COMPLETE_STATUS = {
         VendorName: { value: "Acme <b>Ltd</b> & Sons", confidence: 0.99 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.4 },
-        AmountDue: { value: "120.00", confidence: 0.6 },
         SubTotal: { value: "100.00 EUR", confidence: null },
-        // TotalTax is deliberately absent, so the add control has something to
-        // offer. PreviousUnpaidBalance is not kept anywhere by this deployment,
-        // so the review screen must not show it either.
+        TotalTax: { value: "10.00 EUR", confidence: 0.9 },
+        // The add-a-field control is gone, so what the model returned is exactly
+        // what is on screen. PreviousUnpaidBalance and AmountDue are not kept
+        // anywhere by this deployment, so the review screen must not show them.
         PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
+        AmountDue: { value: "120.00", confidence: 0.6 },
         EmptyField: { value: "", confidence: 0.9 },
       },
     },
@@ -82,8 +83,30 @@ const NO_MERCHANT_STATUS = {
       index: 0,
       confidence: 0.95,
       fields: {
-        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        SubTotal: { value: "100.00 EUR", confidence: 0.8 },
+        TotalTax: { value: "10.00 EUR", confidence: 0.9 },
+      },
+    },
+  ],
+};
+
+// A document the model read no total tax from. Like a missing merchant, the
+// total tax row must still be on screen, empty, warning, and impossible to
+// accept without a value.
+const NO_TOTAX_STATUS = {
+  status: "complete",
+  documentCount: 1,
+  documents: [
+    {
+      index: 0,
+      confidence: 0.95,
+      fields: {
+        VendorName: { value: "Acme Ltd", confidence: 0.99 },
+        DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        SubTotal: { value: "100.00 EUR", confidence: 0.8 },
       },
     },
   ],
@@ -611,12 +634,13 @@ async function captureAndUpload(win) {
   check("VendorName shown as Merchant", names.includes("Merchant"), names.join(" | "));
   check(
     "only the reviewed fields are on the screen",
-    names.join(" | ") === "Merchant | Due date | Invoice total | Amount due | Subtotal",
+    names.join(" | ") ===
+      "Merchant | Date | Invoice total | Subtotal | Total tax",
     names.join(" | ")
   );
   check(
-    "a dropped field (previous unpaid balance) is not shown",
-    !names.includes("Previous unpaid balance"),
+    "dropped fields (previous unpaid balance, amount due) are not shown",
+    !names.includes("Previous unpaid balance") && !names.includes("Amount due"),
     names.join(" | ")
   );
   check(
@@ -628,6 +652,12 @@ async function captureAndUpload(win) {
     "priority fields sort first",
     names.indexOf("Merchant") === 0,
     names.join(" | ")
+  );
+  check(
+    "there is no add-a-field dropdown",
+    !win.document.querySelector(".fields__add") &&
+      !win.document.querySelector(".fields__add-select"),
+    "dropdown still present"
   );
 
   const values = [...win.document.querySelectorAll(".fields__input")];
@@ -644,13 +674,24 @@ async function captureAndUpload(win) {
   );
   check(
     "money is shown without its currency suffix",
-    values.some((input) => input.value === "120.00"),
+    values.filter((input) => /^\d+\.\d{2}$/.test(input.value)).length === 3 &&
+      values.some((input) => input.value === "120.00") &&
+      values.some((input) => input.value === "100.00") &&
+      values.some((input) => input.value === "10.00"),
     values.map((input) => input.value).join(" | ")
   );
   check(
-    "the due date is shown as DD/MM/YYYY",
-    values.some((input) => input.value === "01/03/2026"),
+    "the date is a calendar field showing the ISO value",
+    values.some(
+      (input) =>
+        input.getAttribute("type") === "date" && input.value === "2026-03-01"
+    ),
     values.map((input) => input.value).join(" | ")
+  );
+  check(
+    "confirming is labelled Upload my invoice",
+    win.document.getElementById("photoOkay").textContent.trim() === "Upload my invoice",
+    win.document.getElementById("photoOkay").textContent.trim()
   );
   const badges = [...win.document.querySelectorAll(".confidence")].map((b) => ({
     text: b.textContent,
@@ -1119,14 +1160,14 @@ async function captureAndUpload(win) {
   await wait(1200);
 
   const dueDate = [...win.document.querySelectorAll(".fields__input")]
-    .find((input) => input.value === "01/03/2026");
+    .find((input) => input.getAttribute("type") === "date" && input.value === "2026-03-01");
   check(
-    "an extracted due date is editable",
+    "an extracted date is editable through its calendar field",
     !!dueDate && dueDate instanceof win.HTMLInputElement,
     valuesOnScreen(win)
   );
   if (dueDate) {
-    dueDate.value = "01/04/2026";
+    dueDate.value = "2026-04-01";
     dueDate.dispatchEvent(new win.Event("input"));
   }
   // Correcting an extracted value withdraws its confidence badge: the score
@@ -1153,13 +1194,13 @@ async function captureAndUpload(win) {
   }
   check(
     "the corrections carry the edited date",
-    correctedFields.DueDate && correctedFields.DueDate.value === "01/04/2026",
+    correctedFields.DueDate && correctedFields.DueDate.value === "2026-04-01",
     JSON.stringify(correctedFields)
   );
   check(
     "and nothing the reviewer left alone",
     !correctedFields.VendorName && !correctedFields.InvoiceTotal &&
-      !correctedFields.AmountDue && !correctedFields.SubTotal,
+      !correctedFields.SubTotal,
     JSON.stringify(correctedFields)
   );
 
@@ -1211,59 +1252,30 @@ async function captureAndUpload(win) {
     merchantInput.value
   );
 
-  // Adding a missing field (TotalTax). Malformed values are refused outright,
-  // so a missing field is added with one good value or not at all.
-  const addSelect = win.document.querySelector(".fields__add-select");
-  const addInput = win.document.querySelector(".fields__add-input");
-  const addButton = win.document.querySelector(".fields__add-button");
+  // Adding a missing field (TotalTax) is no longer possible: the add-a-field
+  // dropdown is gone, so the reviewer edits only what the model returned or
+  // fills the required merchant where the model found none.
   check(
-    "the add control offers only the missing field",
-    !!addSelect && !!addButton &&
-      [...addSelect.options].some((option) => option.value === "TotalTax"),
+    "no add-a-field dropdown is present",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
-  );
-  addSelect.value = "TotalTax";
-  addInput.value = "12.5"; // needs two decimals
-  addButton.click();
-  await tick();
-  check(
-    "a malformed value is refused when adding a field",
-    inputField("TotalTax") === null &&
-      /Total tax/i.test(win.document.getElementById("status").textContent),
-    win.document.getElementById("status").textContent
-  );
-  addInput.value = "12.50";
-  addButton.click();
-  await tick();
-  check(
-    "a valid added field appears with the typed value",
-    inputField("TotalTax") && inputField("TotalTax").value === "12.50",
-    valuesOnScreen(win)
-  );
-  check(
-    "and is not offered a second time",
-    ![...addSelect.options].some((option) => option.value === "TotalTax")
-  );
-  check(
-    "the add control is hidden once nothing is missing",
-    !!win.document.querySelector(".fields__add").hidden
   );
 
   // Accepting while an edited value does not fit is refused, not sent.
-  const tax = inputField("TotalTax");
-  tax.value = "12.";
-  tax.dispatchEvent(new win.Event("input"));
+  const moneyField = inputField("InvoiceTotal");
+  moneyField.value = "12.";
+  moneyField.dispatchEvent(new win.Event("input"));
   const decisionsBefore = win.__fetchStub.decisions.length;
   win.document.getElementById("photoOkay").click();
   await wait(300);
   check(
     "accepting an edited value that does not fit is refused",
     win.__fetchStub.decisions.length === decisionsBefore &&
-      /Total tax/i.test(win.document.getElementById("status").textContent),
+      /Invoice total/i.test(win.document.getElementById("status").textContent),
     win.document.getElementById("status").textContent
   );
-  tax.value = "12.50";
-  tax.dispatchEvent(new win.Event("input"));
+  moneyField.value = "12.50";
+  moneyField.dispatchEvent(new win.Event("input"));
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const clean = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1275,7 +1287,7 @@ async function captureAndUpload(win) {
   }
   check(
     "the cleaned money travels in the corrections",
-    cleanFields.TotalTax && cleanFields.TotalTax.value === "12.50",
+    cleanFields.InvoiceTotal && cleanFields.InvoiceTotal.value === "12.50",
     JSON.stringify(cleanFields)
   );
   check(
@@ -1286,46 +1298,14 @@ async function captureAndUpload(win) {
   );
   check(
     "while untouched values stay off the wire",
-    !cleanFields.AmountDue && !cleanFields.SubTotal,
+    !cleanFields.SubTotal && !cleanFields.TotalTax,
     JSON.stringify(cleanFields)
-  );
-
-  // Removing an added field takes it back out of the corrections.
-  win = buildDom({
-    analysisApiBaseUrl: "https://analysis.example",
-    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
-  });
-  await tick();
-  await captureAndUpload(win);
-  await wait(1200);
-  const s2 = win.document.querySelector(".fields__add-select");
-  s2.value = "TotalTax";
-  win.document.querySelector(".fields__add-input").value = "12.50";
-  win.document.querySelector(".fields__add-button").click();
-  await tick();
-  const addedRow = [...win.document.querySelectorAll(".fields__row")]
-    .find((row) => row.dataset.field === "TotalTax");
-  addedRow.querySelector(".fields__remove").click();
-  win.document.getElementById("photoOkay").click();
-  await wait(300);
-  const afterRemove = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
-  let removedPayload = {};
-  try {
-    removedPayload = JSON.parse(afterRemove.body);
-  } catch {
-    // Reported by the check below.
-  }
-  const remaining = ((removedPayload.documents || [])[0] || {}).fields || {};
-  check(
-    "a removed field is left out of the corrections",
-    !remaining.TotalTax,
-    JSON.stringify(remaining)
   );
 
   console.log("\n--- 20b. a missing merchant is required, not optional ---");
   // A document Document Intelligence read no merchant from shows the merchant
-  // row empty and prompting. It is not hidden away in the add control, and the
-  // document cannot be stored until the reviewer types one.
+  // row empty and prompting, and the document cannot be stored until the
+  // reviewer types one.
   win = buildDom({
     analysisApiBaseUrl: "https://analysis.example",
     statuses: [{ ...NO_MERCHANT_STATUS, photoSatisfied: null }],
@@ -1355,12 +1335,9 @@ async function captureAndUpload(win) {
       /required/i.test(merchantError.textContent),
     merchantError ? merchantError.textContent : "no error row"
   );
-  const merchantOffered = [...win.document.querySelectorAll(".fields__add-select")]
-    .flatMap((select) => [...select.options])
-    .some((option) => option.value === "VendorName");
   check(
-    "and not offered in the add control",
-    !merchantOffered,
+    "and there is no add control to find it in",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
   );
   const blockedDecisions = win.__fetchStub.decisions.length;
@@ -1400,6 +1377,86 @@ async function captureAndUpload(win) {
     JSON.stringify(merchantFields)
   );
 
+  console.log("\n--- 20c. a missing total tax is required, like the merchant ---");
+  // TotalTax is the merchant's partner in requiredness: a document the model
+  // read none from shows the row empty and warning, and the document cannot be
+  // stored until a valid amount is typed.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...NO_TOTAX_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+
+  const taxRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "TotalTax");
+  const taxBox = taxRow && taxRow.querySelector(".fields__input");
+  const taxError = taxRow && taxRow.querySelector(".fields__error");
+  check(
+    "a missing total tax is shown as an empty editable row",
+    !!taxBox && taxBox.value === "",
+    valuesOnScreen(win)
+  );
+  check(
+    "labelled Total tax, ready to type into",
+    !!taxRow &&
+      taxRow.querySelector(".fields__name").textContent === "Total tax",
+    valuesOnScreen(win)
+  );
+  check(
+    "with a red warning that it is required",
+    !!taxError && !taxError.hidden &&
+      /required/i.test(taxError.textContent),
+    taxError ? taxError.textContent : "no error row"
+  );
+  const blockedTax = win.__fetchStub.decisions.length;
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "accepting without a total tax is refused",
+    win.__fetchStub.decisions.length === blockedTax &&
+      /total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  taxBox.value = "12.5"; // needs two decimals
+  taxBox.dispatchEvent(new win.Event("input"));
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "a total tax without two decimals is still refused",
+    win.__fetchStub.decisions.length === blockedTax &&
+      /total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  taxBox.value = "12.50";
+  taxBox.dispatchEvent(new win.Event("input"));
+  check(
+    "a valid amount withdraws the warning",
+    !taxError.hidden === false,
+    taxError.textContent
+  );
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const taxDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let taxPayload = {};
+  try {
+    const payload = JSON.parse(taxDecision.body);
+    taxPayload = ((payload.documents || [])[0] || {}).fields || {};
+  } catch {
+    // Reported by the check below.
+  }
+  check(
+    "with a total tax typed it is stored",
+    taxPayload.TotalTax && taxPayload.TotalTax.value === "12.50",
+    JSON.stringify(taxPayload)
+  );
+  check(
+    "and the untouched merchant stays off the wire",
+    !taxPayload.VendorName,
+    JSON.stringify(taxPayload)
+  );
+
   console.log("\n--- 21. the same editing and validation works for an uploaded photo ---");
   // The upload path must offer exactly the same correction controls as the
   // camera path: both reach the same review screen, so there is no reason for
@@ -1422,19 +1479,16 @@ async function captureAndUpload(win) {
     valuesOnScreen(win)
   );
   check(
-    "and its missing fields can be added",
-    !!win.document.querySelector(".fields__add-select"),
+    "and there is no add-a-field dropdown either",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
   );
 
-  const due = [...uploadInputs].find((input) => input.value === "01/03/2026");
-  due.value = "01/05/2026";
+  const due = [...uploadInputs].find(
+    (input) => input.getAttribute("type") === "date" && input.value === "2026-03-01"
+  );
+  due.value = "2026-05-01";
   due.dispatchEvent(new win.Event("input"));
-  const uploadAddSelect = win.document.querySelector(".fields__add-select");
-  uploadAddSelect.value = "TotalTax";
-  win.document.querySelector(".fields__add-input").value = "12.50";
-  win.document.querySelector(".fields__add-button").click();
-  await tick();
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const uploadDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1447,12 +1501,7 @@ async function captureAndUpload(win) {
   const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
   check(
     "accepting an uploaded photo sends its corrections",
-    uploadFields.TotalTax && uploadFields.TotalTax.value === "12.50",
-    JSON.stringify(uploadFields)
-  );
-  check(
-    "including the edited due date",
-    uploadFields.DueDate && uploadFields.DueDate.value === "01/05/2026",
+    uploadFields.DueDate && uploadFields.DueDate.value === "2026-05-01",
     JSON.stringify(uploadFields)
   );
 

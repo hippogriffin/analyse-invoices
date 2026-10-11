@@ -69,21 +69,24 @@
   const POLL_MIN_MS = 500;
   const POLL_MAX_MS = 4000;
 
-  // The only fields a reviewer may correct or add, and the exact kind of value
-  // each may hold. VendorName reads as "Merchant" to match the existing
-  // downstream schema. Everything else Document Intelligence returns is still
-  // stored by the backend, but is not shown here so nothing outside this list
-  // can be edited or injected.
+  // The only fields a reviewer may correct, and the exact kind of value each may
+  // hold. VendorName reads as "Merchant" to match the existing downstream
+  // schema. Everything else Document Intelligence returns is still stored by
+  // the backend, but is not shown here so nothing outside this list can be
+  // edited or injected.
   const REVIEWABLE_FIELDS = {
     // The merchant is required: a document with no merchant cannot be stored,
-    // so it is shown as an empty row to be filled in rather than waiting in the
-    // add control.
+    // so it is shown as an empty row warning to be filled in.
     VendorName: { label: "Merchant", type: "text", required: true },
-    DueDate: { label: "Due date", type: "date" },
-    InvoiceTotal: { label: "Invoice total", type: "money" },
-    AmountDue: { label: "Amount due", type: "money" },
-    SubTotal: { label: "Subtotal", type: "money" },
-    TotalTax: { label: "Total tax", type: "money" },
+    // The date, invoice total and subtotal are required as well: a record
+    // must have all of them before it is written. The date is picked from a
+    // calendar, not typed, so the field is rendered as a date input.
+    DueDate: { label: "Date", type: "date", required: true },
+    InvoiceTotal: { label: "Invoice total", type: "money", required: true },
+    SubTotal: { label: "Subtotal", type: "money", required: true },
+    // The total tax is required like the merchant: the document cannot be
+    // stored without it, so an empty warning row asks for it too.
+    TotalTax: { label: "Total tax", type: "money", required: true },
   };
 
   // Rendering order: merchants are what people look for first.
@@ -92,7 +95,7 @@
   // How to say what an edited value must look like, per field type.
   const VALID_HINTS = {
     money: "an amount with two decimals, like 120.00",
-    date: "a date as DD/MM/YYYY",
+    date: "a full date chosen from the calendar",
     text: "only letters, numbers and spaces",
   };
 
@@ -818,21 +821,19 @@
     const list = document.createElement("dl");
     list.className = "fields";
     sortFields([...fields]).forEach(([name, field]) => {
-      list.appendChild(renderFieldRow(name, field, false));
+      list.appendChild(renderFieldRow(name, field));
     });
     section.appendChild(list);
-    // The reviewer is offered the chance to fill the same reviewable fields
-    // when Document Intelligence did not return them.
-    section.appendChild(buildAddFieldControl(list));
     return section;
   }
 
   /**
    * What an extracted value is shown as before anyone edits it.
    *
-   * Money values arrive with a currency suffix ("120.00 EUR") and dates arrive
-   * as ISO (2026-03-01); both are shown the way a person would type them, so
-   * the field reads as editable at a glance.
+   * Money values arrive with a currency suffix ("120.00 EUR") and are shown
+   * the way a person would type them, so the field reads as editable at a
+   * glance. Dates are left as-is: a date input renders the ISO value through
+   * its own calendar.
    */
   function displayFor(type, value) {
     const text = String(value);
@@ -840,18 +841,14 @@
       const amount = text.match(/\d+(?:\.\d{1,2})?/);
       return amount ? amount[0] : text;
     }
-    if (type === "date") {
-      const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : text;
-    }
     return text;
   }
 
   /**
    * Strip anything a field type can never hold, as the reviewer types or
-   * pastes. Money keeps digits and one decimal point; a date keeps digits and
-   * is laid out as DD/MM/YYYY; a merchant keeps letters, numbers and spaces
-   * only, so command syntax and markup cannot be entered.
+   * pastes. Money keeps digits and one decimal point; a merchant keeps
+   * letters, numbers and spaces only, so command syntax and markup cannot be
+   * entered. Dates are picked from a calendar, so there is nothing to clean.
    */
   function sanitizeFor(type, value) {
     if (type === "money") {
@@ -864,12 +861,6 @@
       }
       return cleaned;
     }
-    if (type === "date") {
-      const digits = value.replace(/\D/g, "").slice(0, 8);
-      return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
-        .filter((part) => part !== "")
-        .join("/");
-    }
     return value.replace(/[^\p{L}\p{N} ]/gu, "");
   }
 
@@ -879,27 +870,14 @@
   function isValidValue(type, value) {
     if (value === "") return true;
     if (type === "money") return /^\d+\.\d{2}$/.test(value);
-    if (type === "date") {
-      const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
-      if (!match) return false;
-      const day = Number(match[1]);
-      const month = Number(match[2]);
-      const year = Number(match[3]);
-      if (year < 1900 || year > 2200) return false;
-      const probe = new Date(Date.UTC(year, month - 1, day));
-      return (
-        probe.getUTCFullYear() === year &&
-        probe.getUTCMonth() === month - 1 &&
-        probe.getUTCDate() === day
-      );
-    }
+    if (type === "date") return /^\d{4}-\d{2}-\d{2}$/.test(value);
     return /^[\p{L}\p{N} ]+$/u.test(value);
   }
 
   /** Whether a row's value is acceptable as it stands. Empty is allowed only on
    * a field that is not required, so a merchant left blank blocks acceptance. */
   function isRowInvalid(reviewable, value) {
-    return (reviewable.required && value === "") || !isValidValue(reviewable.type, value);
+    return (reviewable.required && value.trim() === "") || !isValidValue(reviewable.type, value);
   }
 
   function showFieldError(row, invalid, reviewable) {
@@ -908,7 +886,8 @@
     if (error) {
       error.hidden = !invalid;
       if (reviewable) {
-        const empty = reviewable.required && row.querySelector(".fields__input").value === "";
+        const empty =
+          reviewable.required && row.querySelector(".fields__input").value.trim() === "";
         error.textContent = empty
           ? `${reviewable.label} is required.`
           : `Enter ${VALID_HINTS[reviewable.type]}.`;
@@ -922,7 +901,7 @@
    * person overrides it: a score for automatic reading says nothing about a
    * value a person just typed.
    */
-  function renderFieldRow(name, field, removable) {
+  function renderFieldRow(name, field) {
     const reviewable = REVIEWABLE_FIELDS[name];
     const row = document.createElement("div");
     row.className = "fields__row";
@@ -937,12 +916,21 @@
 
     // Assigned through .value, never as markup: OCR output is untrusted input.
     const input = document.createElement("input");
-    input.type = "text";
     input.className = "fields__input";
     input.setAttribute("aria-label", reviewable.label);
-    input.value = displayFor(reviewable.type, field.value);
+    if (reviewable.type === "date") {
+      // A calendar field: the browser offers the year, month and day to pick,
+      // and holds the value as ISO (YYYY-MM-DD) with nothing to sanitize.
+      input.type = "date";
+      input.value = String(field.value ?? "");
+    } else {
+      input.type = "text";
+      input.value = displayFor(reviewable.type, field.value);
+    }
     input.addEventListener("input", () => {
-      input.value = sanitizeFor(reviewable.type, input.value);
+      if (reviewable.type !== "date") {
+        input.value = sanitizeFor(reviewable.type, input.value);
+      }
       row.dataset.changed = "true";
       state.edited = true;
       const badge = value.querySelector(".confidence");
@@ -965,118 +953,22 @@
     // An empty required field is a prompt, shown even before the reviewer types:
     // it has to be filled in, so there is no point hiding why the accept will
     // not go through until it is.
-    if (reviewable.required && !input.value) {
+    if (reviewable.required && !input.value.trim()) {
       input.setAttribute("placeholder", "Required");
       error.hidden = false;
       error.textContent = `${reviewable.label} is required.`;
       row.classList.toggle("fields__row--invalid", true);
     }
 
-    if (removable) {
-      // Only a field the reviewer added goes away with its row; an extracted
-      // field can be corrected by editing (or clearing) its value.
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "fields__remove";
-      remove.textContent = "Remove";
-      remove.setAttribute("aria-label", `Remove ${reviewable.label}`);
-      remove.addEventListener("click", () => {
-        row.remove();
-        state.edited = true;
-      });
-      value.appendChild(remove);
-    }
-
     row.append(term, value);
     return row;
   }
 
-  /** The per-document control for adding a field Document Intelligence missed. */
-  function buildAddFieldControl(list) {
-    const present = new Set(
-      [...list.querySelectorAll(".fields__row")].map((row) => row.dataset.field)
-    );
-
-    const control = document.createElement("div");
-    control.className = "fields__add";
-
-    const select = document.createElement("select");
-    select.className = "fields__add-select";
-    select.setAttribute("aria-label", "Field to add");
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "Add a missing field…";
-    placeholder.selected = true;
-    placeholder.disabled = true;
-    select.appendChild(placeholder);
-    Object.entries(REVIEWABLE_FIELDS).forEach(([name, reviewable]) => {
-      if (present.has(name)) return;
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = reviewable.label;
-      select.appendChild(option);
-    });
-    // Nothing left to add (all reviewable fields are present), so the control
-    // has nothing to offer and is hidden rather than a dead choice.
-    if (select.options.length === 1) {
-      control.hidden = true;
-    }
-
-    const value = document.createElement("input");
-    value.type = "text";
-    value.className = "fields__add-input";
-    value.placeholder = "Value";
-    value.setAttribute("aria-label", "Value for the added field");
-    value.addEventListener("input", () => {
-      const reviewable = REVIEWABLE_FIELDS[select.value];
-      if (reviewable) value.value = sanitizeFor(reviewable.type, value.value);
-    });
-
-    const addButton = document.createElement("button");
-    addButton.type = "button";
-    addButton.className = "fields__add-button";
-    addButton.textContent = "Add field";
-
-    const add = () => {
-      const name = select.value;
-      if (!name) {
-        setStatus("Choose a field to add first.", "error");
-        return;
-      }
-      const reviewable = REVIEWABLE_FIELDS[name];
-      if (!value.value.trim() || !isValidValue(reviewable.type, value.value)) {
-        setStatus(
-          `Enter a valid ${reviewable.label.toLowerCase()}: ${VALID_HINTS[reviewable.type]}.`,
-          "error"
-        );
-        return;
-      }
-      const row = renderFieldRow(name, { value: value.value, confidence: null }, true);
-      row.dataset.changed = "true";
-      list.appendChild(row);
-      // The field now exists in this document, so it is not offered again; once
-      // every reviewable field is present the control has nothing to offer.
-      select.remove(select.selectedIndex);
-      if (select.options.length === 1) control.hidden = true;
-      select.value = "";
-      value.value = "";
-      state.edited = true;
-    };
-
-    addButton.addEventListener("click", add);
-    value.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") add();
-    });
-
-    control.append(select, value, addButton);
-    return control;
-  }
-
   /**
-   * The values the reviewer changed or added, in the shape the backend merges
-   * over the extracted reading when the photo is accepted. Only rows that were
-   * touched are included, so an untouched reading keeps exactly what the model
-   * returned; a removed added row is simply absent.
+   * The values the reviewer changed, in the shape the backend merges over the
+   * extracted reading when the photo is accepted. Only rows that were touched
+   * are included, so an untouched reading keeps exactly what the model
+   * returned.
    */
   function collectCorrections() {
     const documents = [];

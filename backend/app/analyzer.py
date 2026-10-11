@@ -33,7 +33,7 @@ MAX_BLOB_BYTES = 50 * 1024 * 1024
 
 # Fields this deployment does not store or return anywhere. The frontend never
 # offers these for editing either, so the one filter here covers every path.
-DROPPED_FIELDS = frozenset({"PreviousUnpaidBalance"})
+DROPPED_FIELDS = frozenset({"PreviousUnpaidBalance", "AmountDue"})
 
 DI_ENDPOINT_HINT = (
     "Check DOCUMENT_INTELLIGENCE_ENDPOINT: it must be the Document Intelligence "
