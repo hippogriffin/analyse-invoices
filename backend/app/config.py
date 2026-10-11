@@ -89,6 +89,22 @@ class Settings(BaseSettings):
         default="invoices",
         description="Table Storage table that holds job state and extracted fields.",
     )
+    usage_table_name: str = Field(
+        default="usage",
+        description=(
+            "Table Storage table that counts analysis runs, so the monthly "
+            "allowance can be worked out."
+        ),
+    )
+    monthly_document_allowance: int = Field(
+        default=500,
+        ge=0,
+        description=(
+            "Documents that may be analysed per calendar month. Document "
+            "Intelligence bills per page, so every analysis run spends one, "
+            "whether or not the reviewer keeps the result."
+        ),
+    )
 
     # Document Intelligence ----------------------------------------------
     document_intelligence_endpoint: str = Field(

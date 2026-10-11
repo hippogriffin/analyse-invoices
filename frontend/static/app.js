@@ -35,6 +35,7 @@
     results: document.getElementById("results"),
     resultsTitle: document.getElementById("resultsTitle"),
     resultsMessage: document.getElementById("resultsMessage"),
+    resultsAllowance: document.getElementById("resultsAllowance"),
     resultsBody: document.getElementById("resultsBody"),
     verdict: document.getElementById("verdict"),
     verdictQuestion: document.getElementById("verdictQuestion"),
@@ -933,12 +934,16 @@
           documents: body.documents,
           invoiceId,
           photoSatisfied: body.photoSatisfied,
+          monthlyAllowance: body.monthlyAllowance,
+          documentsRemaining: body.documentsRemaining,
         });
       }
       if (body.status === "failed") {
         return showResults({
           view: "failed",
           message: body.error || "The invoice could not be read.",
+          monthlyAllowance: body.monthlyAllowance,
+          documentsRemaining: body.documentsRemaining,
         });
       }
       showResults({ view: "pending", message: "The service is reading the invoice." });
@@ -1114,12 +1119,21 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function showResults({ view, message, documents, invoiceId, photoSatisfied }) {
+  function showResults({
+    view,
+    message,
+    documents,
+    invoiceId,
+    photoSatisfied,
+    monthlyAllowance,
+    documentsRemaining,
+  }) {
     els.results.hidden = false;
     els.resultsTitle.className = `results__title results__title--${view}`;
     els.resultsTitle.textContent = RESULTS_TITLES[view] || "Analysis";
     els.resultsMessage.textContent = message || "";
     els.resultsMessage.hidden = !message;
+    renderAllowance(monthlyAllowance, documentsRemaining);
     els.resultsBody.replaceChildren();
     // A fresh render starts from the extracted values with no edits.
     state.edited = false;
@@ -1147,8 +1161,28 @@
   function hideResults() {
     els.results.hidden = true;
     els.resultsBody.replaceChildren();
+    renderAllowance();
     state.edited = false;
     hideVerdict();
+  }
+
+  /**
+   * How much of the month's analysis allowance is left.
+   *
+   * Every analysis spends one, whether or not the values are kept, so this sits
+   * with the result rather than being hidden away: it is the number that tells
+   * the reviewer how much they have left to spend. Nothing is shown when the
+   * service did not report an allowance, which is also the case while a reading
+   * is still on its way.
+   */
+  function renderAllowance(monthlyAllowance, documentsRemaining) {
+    const known =
+      typeof monthlyAllowance === "number" &&
+      typeof documentsRemaining === "number";
+    els.resultsAllowance.hidden = !known;
+    els.resultsAllowance.textContent = known
+      ? `${documentsRemaining} of ${monthlyAllowance} documents left this month.`
+      : "";
   }
 
   function renderDocument(document_, index, total) {

@@ -62,6 +62,14 @@ class InvoiceStatusOut(BaseModel):
     #: states are distinguishable.
     photo_satisfied: bool | None = Field(default=None, alias="photoSatisfied")
     documents: list[DocumentOut] = Field(default_factory=list)
+    #: The month's allowance, how much of it has been spent and how much is left.
+    #: Every analysis run spends one, whether or not the result is kept, so the
+    #: numbers are the same for a photo that is later rejected. They are absent
+    #: only when the usage table could not be read, rather than guessed at. This
+    #: is reported, not enforced: the service still analyses whatever it is sent.
+    monthly_allowance: int | None = Field(default=None, alias="monthlyAllowance")
+    documents_used: int | None = Field(default=None, alias="documentsUsed")
+    documents_remaining: int | None = Field(default=None, alias="documentsRemaining")
 
 
 class DocumentFieldPatch(BaseModel):

@@ -19,6 +19,7 @@ from app import clients as clients_module
 from app import config as config_module
 from app import repository as repository_module
 from app import storage as storage_module
+from app import usage as usage_module
 from app.config import Settings, get_settings
 from app.job_state import get_job_state
 
@@ -256,6 +257,22 @@ def table(table_store: dict[str, dict]) -> FakeTableClient:
 
 
 @pytest.fixture
+def usage_store() -> dict[str, dict]:
+    return {}
+
+
+@pytest.fixture
+def usage_table(usage_store: dict[str, dict]) -> FakeTableClient:
+    """The monthly-usage table, kept apart from the results table.
+
+    The service writes usage rows to their own table, so the fakes must not
+    share a store: otherwise a test asserting that an unaccepted reading stored
+    nothing would see the usage row and fail for the wrong reason.
+    """
+    return FakeTableClient(usage_store)
+
+
+@pytest.fixture
 def table_service(table_store: dict[str, dict]) -> FakeTableService:
     return FakeTableService(table_store)
 
@@ -264,6 +281,7 @@ def table_service(table_store: dict[str, dict]) -> FakeTableService:
 def settings(
     monkeypatch: pytest.MonkeyPatch,
     table: FakeTableClient,
+    usage_table: FakeTableClient,
     table_service: FakeTableService,
     blob_container: FakeBlobContainer,
 ) -> object:
@@ -278,7 +296,10 @@ def settings(
     monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
     monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_KEY", raising=False)
     monkeypatch.delenv("DOCUMENT_INTELLIGENCE_KEY", raising=False)
+    monkeypatch.delenv("USAGE_TABLE_NAME", raising=False)
+    monkeypatch.delenv("MONTHLY_DOCUMENT_ALLOWANCE", raising=False)
     monkeypatch.setattr(repository_module, "table_client", lambda *_a, **_k: table)
+    monkeypatch.setattr(usage_module, "table_client", lambda *_a, **_k: usage_table)
     monkeypatch.setattr(
         clients_module, "table_service", lambda *_a, **_k: table_service
     )
