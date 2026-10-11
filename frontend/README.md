@@ -28,8 +28,11 @@ Flow in the browser:
 
 1. On load, the app shows the chooser. It does **not** ask for camera
    permission, so nothing is prompted before the user has chosen.
-2. **Take a photo** requests the camera and shows a live preview. **Take photo**
-   draws the current frame to a canvas and freezes it.
+2. **Take a photo** requests the camera and shows a live preview. A **Zoom**
+   slider (1×–3×) enlarges the preview so an invoice can fill the frame from a
+   distance; it is a digital centre crop, so the whole sensor resolution is kept
+   and the captured photo is exactly the part the preview showed. **Take photo**
+   draws the current frame to a canvas, applies that zoom, and freezes it.
 3. **Upload a photo** opens the OS file chooser, filtered to the accepted image
    types. The file is validated and previewed. The camera is never started.
 4. **Upload** POSTs the image as multipart form field `photo` to this service's
@@ -38,7 +41,12 @@ Flow in the browser:
    the answer straight back.
 
 Either way the same review screen follows: the photo, with **Retake** /
-**Choose another** and **Upload**.
+**Choose another**, **Crop** and **Upload**. **Crop** opens a selection over
+the photo — drag its corners to resize, drag the box to move, then **Apply
+crop** to make the selection the new photo, **Reset** to start again, or
+**Cancel** (or `Escape`) to leave the photo untouched. The selection is kept as
+a percentage of the photo, so it survives any stage resize, and a cropped
+uploaded file keeps its filename.
 
 The camera is stopped as soon as a photo is captured (privacy and battery), and
 also on `pagehide`. Front-facing cameras are mirrored in the preview, and the
@@ -86,7 +94,10 @@ node scripts/check_ui.js
 
 It walks the whole flow (load → choose → capture/pick → submit → results, plus a
 denied-permission case and a rejected submission) and asserts what is on screen
-at each step. It also covers the analysis panel: results appearing while
+at each step. It also covers the framing: the zoom slider enlarging the live
+preview and the captured photo being the zoomed centre of the frame, and the
+crop tool resizing and moving its selection and applying exactly that region.
+It also covers the analysis panel: results appearing while
 analysis runs, field labels and confidence badges, editing and adding values
 with their validation (money and merchant sanitising, malformed additions being
 refused), the failure state, the keep-or-discard question in each of its states,

@@ -29,7 +29,11 @@ chosen photo over the network, so it holds no credentials of any kind.
 ## How the pieces fit
 
 1. The user photographs an invoice, or picks one that already exists on the
-   device. `frontend/` captures or previews it and does nothing else.
+   device. `frontend/` captures or previews it and does nothing else. While the
+   preview is live a **Zoom** slider (1×–3×) enlarges the frame — a digital
+   centre crop, so the captured photo keeps the full resolution of just that
+   part — and a captured or chosen photo can be trimmed with **Crop** before it
+   is sent.
 2. The browser posts the file to `frontend/`, which forwards it to `backend/`.
    The backend returns an invoice id immediately and continues in a background
    task.

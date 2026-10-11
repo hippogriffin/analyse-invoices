@@ -67,11 +67,26 @@
         </section>
 
         <section class="controls" aria-label="Actions">
+          <div id="zoomControl" class="zoom" hidden>
+            <label for="zoomSlider" class="zoom__label">Zoom</label>
+            <input
+              id="zoomSlider"
+              class="zoom__slider"
+              type="range"
+              min="1"
+              max="3"
+              step="0.1"
+              value="1"
+              aria-label="Zoom before taking the photo"
+            />
+            <output id="zoomValue" class="zoom__value" for="zoomSlider">1×</output>
+          </div>
           <button id="capture" type="button" class="button button--primary" disabled>
             Take photo
           </button>
           <div class="controls__group" id="reviewActions" hidden>
             <button id="retake" type="button" class="button button--secondary">Retake</button>
+            <button id="crop" type="button" class="button button--secondary" hidden>Crop</button>
             <button id="upload" type="button" class="button button--primary">Upload</button>
           </div>
         </section>

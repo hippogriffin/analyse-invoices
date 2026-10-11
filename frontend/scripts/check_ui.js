@@ -216,21 +216,36 @@ function buildDom({
   Object.defineProperty(video, "videoHeight", { value: 720, configurable: true });
   video.addEventListener = () => {};
 
+  // So a photo has known pixel dimensions for the crop math.
+  const still = doc.getElementById("still");
+  Object.defineProperty(still, "naturalWidth", { value: 1000, configurable: true });
+  Object.defineProperty(still, "naturalHeight", { value: 1400, configurable: true });
+
+  // Record every canvas draw: the real-world lossiness of capture and crop
+  // cannot run in jsdom, but the source rectangle they ask for can.
+  const canvasDraws = [];
+  win.__canvasDraws = canvasDraws;
   const origCreate = doc.createElement.bind(doc);
   doc.createElement = (tag) => {
     if (String(tag).toLowerCase() !== "canvas") return origCreate(tag);
-    return {
+    const canvas = {
       width: 0,
       height: 0,
       getContext: () => ({
         translate() {},
         scale() {},
-        drawImage() {},
+        drawImage(src, sx, sy, sw, sh) {
+          canvasDraws.push({
+            canvas: { width: canvas.width, height: canvas.height },
+            source: { x: sx, y: sy, width: sw, height: sh },
+          });
+        },
       }),
       toBlob(cb) {
         cb(new win.Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }));
       },
     };
+    return canvas;
   };
 
   win.URL.createObjectURL = () => "blob:fake";
@@ -515,6 +530,71 @@ async function captureAndUpload(win) {
   check("choose-a-photo not offered in camera mode", s.pickFile === false);
   check("placeholder hidden", s.placeholder === false);
 
+  console.log("\n--- 2z. zoom, to fill the frame before the photo is taken ---");
+  // The zoom is a slider on the live preview. It must be reachable only while
+  // the camera is live, and the captured photo must ask the canvas for exactly
+  // the zoomed centre of the feed, so the whole resolution is spent on the
+  // invoice, not the table around it.
+  function lastCanvasDraw(win_) {
+    const draws = win_.__canvasDraws || [];
+    return draws[draws.length - 1];
+  }
+  function pointer(win_, type, target, x, y) {
+    target.dispatchEvent(
+      new win_.PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, buttons: 1, bubbles: true })
+    );
+  }
+  const zw = buildDom({ analysisApiBaseUrl: "https://analysis.example" });
+  await tick();
+  await chooseMode(zw, "camera");
+  check(
+    "the zoom control is offered with the live preview",
+    zw.document.getElementById("zoomControl").hidden === false &&
+      zw.document.getElementById("zoomSlider") &&
+      (zw.document.getElementById("zoomValue").textContent || "").trim() === "1.0×",
+    zw.document.getElementById("zoomValue").textContent.trim()
+  );
+  const zSlider = zw.document.getElementById("zoomSlider");
+  zSlider.value = "2";
+  zSlider.dispatchEvent(new zw.Event("input"));
+  check(
+    "the readout follows the slider",
+    (zw.document.getElementById("zoomValue").textContent || "").trim() === "2.0×",
+    zw.document.getElementById("zoomValue").textContent
+  );
+  check(
+    "the live preview carries the zoom",
+    (zw.document.getElementById("preview").style.transform || "").includes("scale(2)"),
+    zw.document.getElementById("preview").style.transform
+  );
+  zw.document.getElementById("capture").click();
+  await tick();
+  const zoomedDraw = lastCanvasDraw(zw);
+  check(
+    "the captured photo is the zoomed centre of the frame",
+    !!zoomedDraw &&
+      zoomedDraw.canvas.width === 1280 &&
+      zoomedDraw.canvas.height === 720 &&
+      Math.abs(zoomedDraw.source.width - 640) <= 1 &&
+      Math.abs(zoomedDraw.source.height - 360) <= 1 &&
+      Math.abs(zoomedDraw.source.x - 320) <= 1 &&
+      Math.abs(zoomedDraw.source.y - 180) <= 1,
+    JSON.stringify(zoomedDraw)
+  );
+  check(
+    "zooming down back to 1× restores the full frame",
+    (() => {
+      zSlider.value = "1";
+      zSlider.dispatchEvent(new zw.Event("input"));
+      return (zw.document.getElementById("preview").style.transform || "") === "";
+    })(),
+    zw.document.getElementById("preview").style.transform
+  );
+  check(
+    "the zoom control is withdrawn once the photo is taken",
+    zw.document.getElementById("zoomControl").hidden === true
+  );
+
   console.log("\n--- 3. after taking a photo ---");
   win.document.getElementById("capture").click();
   await tick();
@@ -524,6 +604,109 @@ async function captureAndUpload(win) {
   check("retake visible after photo", s.retake === true);
   check("upload visible after photo", s.upload === true);
   check("take-photo button hidden", s.capture === false);
+  check("the crop action is offered with a photo",
+    win.document.getElementById("crop").hidden === false,
+    "crop button not shown"
+  );
+
+  console.log("\n--- 3b. cropping a photo ---");
+  // The crop tool cuts the selection out and makes it the new photo: the
+  // canvas is asked for only the selected region, and cancelling leaves the
+  // photo exactly as it was.
+  const cw = buildDom({ analysisApiBaseUrl: "https://analysis.example" });
+  await tick();
+  await chooseMode(cw, "camera");
+  cw.document.getElementById("capture").click();
+  await tick();
+  const drawsBefore = cw.__canvasDraws.length;
+  cw.document.getElementById("crop").click();
+  await tick();
+  const cropOverlay = cw.document.querySelector(".crop");
+  const cropSelection = cw.document.querySelector(".crop__selection");
+  check(
+    "the crop tool opens over the photo",
+    !!cropOverlay && !!cropSelection,
+    cropOverlay ? "overlay shown" : "no overlay"
+  );
+  check(
+    "starting selection covers the whole photo",
+    !!cropSelection &&
+      cropSelection.style.left === "0%" &&
+      cropSelection.style.top === "0%" &&
+      cropSelection.style.width === "100%" &&
+      cropSelection.style.height === "100%",
+    cropSelection ? cropSelection.outerHTML : "no selection"
+  );
+  check(
+    "with a handle in each corner",
+    cropOverlay.querySelectorAll(".crop__handle[data-corner]").length === 4,
+    String(cropOverlay ? cropOverlay.querySelectorAll(".crop__handle[data-corner]").length : 0)
+  );
+  // Resize from the bottom-right handle, then drag the box to centre-left.
+  const se = cropSelection.querySelector('[data-corner="se"]');
+  pointer(cw, "pointerdown", se, 500, 500);
+  pointer(cw, "pointermove", cw.document, 440, 440);
+  pointer(cw, "pointerup", cw.document, 440, 440);
+  check(
+    "dragging a corner resizes the selection",
+    cropSelection.style.width === "94%" && cropSelection.style.height === "94%",
+    `${cropSelection.style.width}/${cropSelection.style.height}/${cropSelection.style.left}/${cropSelection.style.top}`
+  );
+  pointer(cw, "pointerdown", cropSelection, 200, 200);
+  pointer(cw, "pointermove", cw.document, 250, 250);
+  pointer(cw, "pointerup", cw.document, 250, 250);
+  check(
+    "dragging the box moves it without changing its size",
+    cropSelection.style.left === "5%" && cropSelection.style.top === "5%" &&
+      cropSelection.style.width === "94%" && cropSelection.style.height === "94%",
+    `${cropSelection.style.left}/${cropSelection.style.top}/${cropSelection.style.width}/${cropSelection.style.height}`
+  );
+  const apply = [...cropOverlay.querySelectorAll("button")].find((b) => /apply crop/i.test(b.textContent));
+  apply.click();
+  await tick();
+  const croppedDraw = lastCanvasDraw(cw);
+  check(
+    "applying reads exactly the selected region",
+    !!croppedDraw &&
+      croppedDraw.source.x === 50 &&
+      croppedDraw.source.y === 70 &&
+      croppedDraw.source.width === 940 &&
+      croppedDraw.source.height === 1316 &&
+      croppedDraw.canvas.width === 940 &&
+      croppedDraw.canvas.height === 1316,
+    JSON.stringify(croppedDraw)
+  );
+  check(
+    "the crop tool closes once applied",
+    !cw.document.querySelector(".crop"),
+    "overlay still open"
+  );
+  check(
+    "and the photo is still there to upload",
+    !cw.document.getElementById("crop").hidden &&
+      cw.document.getElementById("still").hidden === false
+  );
+  check(
+    "the cropped photo was not re-read from the camera",
+    cw.__canvasDraws[drawsBefore - 1] && cw.__canvasDraws.length === drawsBefore + 1,
+    JSON.stringify(cw.__canvasDraws.slice(drawsBefore))
+  );
+  // Cancelling after a partial change must not re-encode anything.
+  cw.document.getElementById("crop").click();
+  await tick();
+  const cancelOverlay = cw.document.querySelector(".crop");
+  const cancelSelection = cw.document.querySelector(".crop__selection");
+  pointer(cw, "pointerdown", cancelSelection.querySelector('[data-corner="se"]'), 500, 500);
+  pointer(cw, "pointermove", cw.document, 400, 400);
+  pointer(cw, "pointerup", cw.document, 400, 400);
+  [...cancelOverlay.querySelectorAll("button")].find((b) => /cancel/i.test(b.textContent)).click();
+  await tick();
+  check(
+    "cancelling closes the tool without re-encoding the photo",
+    !cw.document.querySelector(".crop") &&
+      cw.__canvasDraws.length === drawsBefore + 1,
+    JSON.stringify(cw.__canvasDraws.slice(drawsBefore))
+  );
 
   console.log("\n--- 4. after clicking Retake ---");
   win.__placeholderShown.length = 0; // only care about the retake transition
