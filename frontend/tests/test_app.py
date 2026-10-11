@@ -44,6 +44,24 @@ def test_static_assets_are_served(client: TestClient):
     assert client.get("/static/styles.css").status_code == 200
 
 
+def test_the_service_worker_is_served_from_the_root_as_javascript(client: TestClient):
+    """A service worker script must be JavaScript, and can only control URLs at
+    or below its own directory — so it is served from the root, not /static."""
+    response = client.get("/sw.js")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "addEventListener" in response.text
+
+
+def test_the_installable_manifest_and_its_icons_are_served(client: TestClient):
+    response = client.get("/static/manifest.json")
+
+    assert response.status_code == 200
+    for icon in response.json()["icons"]:
+        assert client.get(icon["src"]).status_code == 200, f"{icon['src']} is not served"
+
+
 def test_healthz(client: TestClient):
     response = client.get("/healthz")
 
@@ -115,6 +133,7 @@ def test_the_service_exposes_no_azure_routes(client: TestClient):
     paths = _all_route_paths(app.routes)
     assert paths == {
         "/",
+        "/sw.js",
         "/healthz",
         "/api/config",
         "/api/invoices",

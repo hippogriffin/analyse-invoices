@@ -113,6 +113,29 @@ Desktop webcams work. On a phone, open the site over HTTPS and grant camera
 permission when the browser asks. Note that a phone on `http://<lan-ip>` will
 **not** get camera access — use HTTPS.
 
+## Installable as an app (PWA)
+
+The page can be installed to a phone's home screen and opened without browser
+chrome. Three pieces make that work:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| Web App Manifest | `static/manifest.json` | name, colours and the 192/512px icons; `display: standalone` is what drops the browser UI |
+| App icons | `static/icons/` | the `any` icons, a `purpose: maskable` one, and the iOS touch icon. Regenerate with `python3 scripts/make_icons.py` (standard library only) |
+| Service worker | `static/sw.js` | precaches the shell so the app opens offline; served from `/sw.js` so its scope is the whole app |
+
+To install: on Android/Chrome use **Install app** (or the ⋮ → *Add to Home
+screen*); on iOS use Safari's Share sheet → **Add to Home Screen**. Both need a
+secure context (HTTPS), the same requirement the camera already has — so the
+deployed site installs, but `http://<lan-ip>` does not.
+
+The service worker is a bonus, never a dependency: the page works with it
+disabled or unregistered. Its strategy is **network-first** with a cache
+fallback, because the static files have no content-hashed names — a cache-first
+worker would pin an old `app.js` forever across deploys. It never handles
+`/api/` requests, so an upload or a result is always live and never served from
+a stale cache.
+
 ## Configuration
 
 All settings come from environment variables (see `.env.example`):
