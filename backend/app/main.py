@@ -28,11 +28,12 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, Upl
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.analyzer import AnalysisError, analyze, download_photo
+from app.analyzer import AnalysisError, DROPPED_FIELDS, analyze, download_photo
 from app.clients import NotConfiguredError, StorageWriteError, ensure_table
 from app.config import JobStatus, get_settings
 from app.job_state import get_job_state, overlay
 from app.models import (
+    DocumentFieldPatch,
     InvoiceAccepted,
     InvoiceCorrections,
     InvoiceStatusOut,
@@ -306,6 +307,10 @@ def create_app() -> FastAPI:
             satisfied = state.satisfied
         body["error"] = state.error if state else None
         body["photoSatisfied"] = satisfied
+        # Dropped fields are never shown, whatever the source: the analysis
+        # should never hold one, but a row may have been written before this
+        # filter existed, and the held state forgets nothing it already had.
+        body["documents"] = _without_dropped_fields(body["documents"])
         return InvoiceStatusOut.model_validate(body)
 
     @app.get(
@@ -359,26 +364,22 @@ def create_app() -> FastAPI:
             # reading that has not been stored yet, and leave a stored record
             # alone so a second confirmation is a no-op rather than a rewrite.
             if record is None:
-                # Reporting a storage failure as a failed analysis would be a lie
-                # about the photo, so it is passed on as the upstream problem it is.
-                try:
-                    save_documents(
-                        settings, partition, held.blob_name, _from_held(held.documents)
-                    )
-                except StorageWriteError as exc:
-                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                source = _response_documents(held, None)
+                _require_merchant(source)
+                storable = _from_held(source)
+            else:
+                storable = None
         else:
             # The reviewer corrected values, so the stored record must reflect
             # what they approved. That applies whether the reading is still held
             # or was already stored (and on screen again after a restart).
             source = _response_documents(held, record)
+            merged = _apply_corrections(source, corrections)
+            storable = _from_held(merged)
+            _require_merchant(merged)
+        if storable is not None:
             try:
-                save_documents(
-                    settings,
-                    partition,
-                    _blob_name(held, record),
-                    _from_held(_apply_corrections(source, corrections)),
-                )
+                save_documents(settings, partition, _blob_name(held, record), storable)
             except StorageWriteError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
         job_state.set_satisfied(partition, True)
@@ -429,10 +430,54 @@ def _response_documents(
     be applied without caring which source is current.
     """
     if held is not None and held.documents:
-        return list(held.documents)
+        return list(_without_dropped_fields(held.documents))
     if record is not None:
-        return [document.as_dict() for document in record.documents]
+        return _without_dropped_fields([document.as_dict() for document in record.documents])
     return []
+
+
+def _without_dropped_fields(
+    documents: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop the fields this deployment keeps nowhere at all."""
+    cleaned: list[dict[str, Any]] = []
+    for document in documents:
+        document = dict(document)
+        fields = document.get("fields") or {}
+        document["fields"] = {
+            name: value
+            for name, value in fields.items()
+            if name not in DROPPED_FIELDS
+        }
+        cleaned.append(document)
+    return cleaned
+
+
+REQUIRED_FIELDS = frozenset({"VendorName"})
+
+
+def _require_merchant(documents: list[dict[str, Any]]) -> None:
+    """Refuse to write a document that has no merchant.
+
+    The reviewer is asked for a merchant until one is read or typed, so a record
+    reaching the table always has one. This guard is the last line of that rule:
+    a document the model read no merchant from, or whose merchant a correction
+    cleared, is rejected rather than stored as a blank.
+    """
+    for position, document in enumerate(documents):
+        fields = document.get("fields") or {}
+        missing = any(
+            not str((fields.get(name) or {}).get("value") or "").strip()
+            for name in REQUIRED_FIELDS
+        )
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Document {position} has no merchant (VendorName). "
+                    "Correct it before accepting: a merchant is required."
+                ),
+            )
 
 
 def _blob_name(held: Any, record: InvoiceRecord | None) -> str:
@@ -453,9 +498,16 @@ def _apply_corrections(
     names are overridden; a field the reviewer cleared becomes an empty value.
     Anything not mentioned keeps its extracted value, and a correction for a
     page the model did not return is ignored, so a wrong index can never invent
-    a document.
+    a document. Fields this deployment drops are ignored even if a client names
+    them, so a dropped field can never be reintroduced through a correction.
     """
-    by_index = {patch.index: patch.fields for patch in corrections.documents}
+    by_index: dict[int, dict[str, DocumentFieldPatch]] = {}
+    for patch in corrections.documents:
+        by_index[patch.index] = {
+            name: field
+            for name, field in patch.fields.items()
+            if name not in DROPPED_FIELDS
+        }
     if not by_index:
         return list(documents)
     merged: list[dict[str, Any]] = []

@@ -4,6 +4,10 @@ The field walk is generic on purpose: prebuilt-invoice returns a different
 field set per industry, and a hardcoded list would silently drop fields. Every
 field the model returns is captured, with its confidence, so adding a field
 never needs a code change.
+
+The one exception is fields this deployment does not want kept by anyone, not
+even a reviewer. The frontend never shows these, and they are filtered here so
+they never reach a screen, a stored row, or a response.
 """
 
 from __future__ import annotations
@@ -26,6 +30,10 @@ from app.repository import ExtractedDocument, ExtractedField, coerce
 logger = logging.getLogger(__name__)
 
 MAX_BLOB_BYTES = 50 * 1024 * 1024
+
+# Fields this deployment does not store or return anywhere. The frontend never
+# offers these for editing either, so the one filter here covers every path.
+DROPPED_FIELDS = frozenset({"PreviousUnpaidBalance"})
 
 DI_ENDPOINT_HINT = (
     "Check DOCUMENT_INTELLIGENCE_ENDPOINT: it must be the Document Intelligence "
@@ -71,6 +79,8 @@ def _to_documents(result: object) -> list[ExtractedDocument]:
             (getattr(document, "fields", None) or {}).items()
         ):
             raw_value, confidence = _read_field(field)
+            if name in DROPPED_FIELDS:
+                continue
             items.append(
                 ExtractedField(name=name, value=coerce(raw_value), confidence=confidence)
             )

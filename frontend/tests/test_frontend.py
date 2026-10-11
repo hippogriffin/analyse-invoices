@@ -313,8 +313,72 @@ def test_extracted_values_are_never_inserted_as_html():
             assert forbidden not in code, (
                 f"{name}() must not use {forbidden} with extracted field values"
             )
-    assert "input.value = String(field.value)" in functions["renderFieldRow"], (
+    assert "displayFor(reviewable.type, field.value)" in functions["renderFieldRow"], (
         "field values must be assigned to the editable input with .value"
+    )
+    assert "input.value =" in functions["renderFieldRow"], (
+        "field values must be assigned through .value, never as markup"
+    )
+
+
+def test_only_reviewable_fields_can_be_edited_or_added():
+    """The reviewer is trusted with a fixed list of fields, nothing else.
+
+    Document Intelligence may return many more fields (a previous unpaid
+    balance, an account number...), and the backend still stores them, but the
+    review screen shows exactly the fields a person may correct or add, so no
+    other value can be entered or pasted.
+    """
+    render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
+    assert render, "renderDocument not found"
+    assert "REVIEWABLE_FIELDS[name]" in render.group(0), (
+        "only reviewable fields may be rendered for editing"
+    )
+    assert "renderFieldRow(" in render.group(0), (
+        "each extracted field must render through the editable row builder"
+    )
+    assert "buildAddFieldControl(" in render.group(0), (
+        "each document must offer the add-a-missing-field control"
+    )
+    add = re.search(r"function buildAddFieldControl\(.*?\n  \}", APP_JS, re.S)
+    assert add, "buildAddFieldControl not found"
+    assert "Object.entries(REVIEWABLE_FIELDS)" in add.group(0), (
+        "the add control must offer only the reviewable fields"
+    )
+    # The six trusted fields: merchant, date, and the four money amounts.
+    assert re.search(r"VendorName\s*:\s*\{[^}]*type:\s*\"text\"", APP_JS), (
+        "Merchant must be a free text field"
+    )
+    for money in ("InvoiceTotal", "AmountDue", "SubTotal", "TotalTax"):
+        assert re.search(
+            rf"{money}\s*:\s*\{{[^}}]*type:\s*\"money\"", APP_JS
+        ), f"{money} must be a money field"
+    assert re.search(r"DueDate\s*:\s*\{[^}]*type:\s*\"date\"", APP_JS), (
+        "Due date must be a date field"
+    )
+
+
+def test_field_values_are_validated_not_just_typed():
+    """Money, date and merchant values are constrained, so no text or command
+    syntax can be entered as if it were a reading.
+
+    Validation is layered: characters are stripped as they are typed or pasted,
+    and accepting with an edited field that still does not fit is refused.
+    """
+    assert "sanitizeFor(" in APP_JS, "an input sanitizer is needed"
+    assert "isValidValue(" in APP_JS, "a value validator is needed"
+    assert r"/^\d+\.\d{2}$/" in APP_JS, (
+        "money must be digits with exactly two decimals"
+    )
+    assert r"/^(\d{2})\/(\d{2})\/(\d{4})$/" in APP_JS, (
+        "dates must be validated as DD/MM/YYYY"
+    )
+    assert r"\p{L}\p{N} " in APP_JS, (
+        "a merchant must allow only letters, numbers and spaces"
+    )
+    send = re.search(r"async function sendVerdict\(.*?\n  \}", APP_JS, re.S)
+    assert "firstInvalidField()" in send.group(0), (
+        "accepting must refuse while an edited field is invalid"
     )
 
 
@@ -324,14 +388,6 @@ def test_every_field_is_editable_and_missing_ones_can_be_added():
     Each value is an input, and each document offers a way to add a field
     Document Intelligence did not return, such as a missing merchant.
     """
-    render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
-    assert render, "renderDocument not found"
-    assert "renderFieldRow(" in render.group(0), (
-        "each extracted field must render through the editable row builder"
-    )
-    assert "buildAddFieldControl(" in render.group(0), (
-        "each document must offer the add-a-missing-field control"
-    )
     row = re.search(r"function renderFieldRow\(.*?\n  \}", APP_JS, re.S)
     assert row, "renderFieldRow not found"
     assert 'document.createElement("input")' in row.group(0), (
@@ -339,13 +395,47 @@ def test_every_field_is_editable_and_missing_ones_can_be_added():
     )
     add = re.search(r"function buildAddFieldControl\(.*?\n  \}", APP_JS, re.S)
     assert add, "buildAddFieldControl not found"
-    assert "Object.entries(FIELD_LABELS)" in add.group(0), (
-        "the add control must offer the known invoice fields"
+    assert 'textContent = "Add a missing field…"' in APP_JS, (
+        "the add-a-missing-field control must be offered"
     )
     # Added fields are removable; extracted ones are corrected instead.
     assert 'row.className = "fields__row"' in row.group(0)
     assert "row.dataset.field = name" in row.group(0), (
         "each row must record its field name for the corrections payload"
+    )
+    assert "row.dataset.changed = \"true\"" in APP_JS, (
+        "edited and added rows must be marked as changed"
+    )
+
+
+def test_the_merchant_is_required():
+    """A document with no merchant is not stored.
+
+    Document Intelligence reads a merchant most of the time, but a document it
+    read none from must still be confirmable only with a value: the row is
+    rendered empty for the reviewer to type into, the add control does not offer
+    it, and accepting is refused until it holds something.
+    """
+    assert re.search(r"VendorName\s*:\s*\{[^}]*required\s*:\s*true", APP_JS), (
+        "the merchant must be marked as the required field"
+    )
+    render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
+    assert render, "renderDocument not found"
+    assert re.search(r"reviewable\.required\s*&&\s*!fields\.has\(", render.group(0)), (
+        "a required field must be rendered even when the model did not return it"
+    )
+    invalid = re.search(r"function firstInvalidField\(.*?\n  \}", APP_JS, re.S)
+    assert invalid, "firstInvalidField not found"
+    assert r"reviewable.required" in invalid.group(0), (
+        "an empty required field must block accepting"
+    )
+    assert "data-changed" in invalid.group(0), (
+        "a touched row must still fit its field"
+    )
+    send = re.search(r"async function sendVerdict\(.*?\n  \}", APP_JS, re.S)
+    assert send, "sendVerdict not found"
+    assert "invalid.empty" in send.group(0), (
+        "the refusal must say which required field is missing"
     )
 
 
@@ -353,7 +443,9 @@ def test_corrections_are_sent_only_when_the_reviewer_changed_something():
     """A plain accept is unchanged; an edited one carries the corrections.
 
     Sending a body on an untouched reading would turn a no-op repeat
-    confirmation into a rewrite, so the DOM is only read once it is dirty.
+    confirmation into a rewrite, so the DOM is only read once it is dirty. Only
+    the rows the reviewer touched travel, so an untouched field keeps exactly
+    what the model returned.
     """
     send = re.search(r"async function sendVerdict\(.*?\n  \}", APP_JS, re.S)
     assert send, "sendVerdict not found"
@@ -364,6 +456,9 @@ def test_corrections_are_sent_only_when_the_reviewer_changed_something():
     )
     collect = re.search(r"function collectCorrections\(\)\s*\{.*?\n  \}", APP_JS, re.S)
     assert collect, "collectCorrections not found"
+    assert ".fields__row[data-changed]" in collect.group(0), (
+        "only rows the reviewer changed must travel as corrections"
+    )
     assert ".fields__input" in collect.group(0), (
         "the corrections must be read from the editable inputs"
     )

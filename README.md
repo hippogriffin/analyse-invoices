@@ -48,8 +48,12 @@ chosen photo over the network, so it holds no credentials of any kind.
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
    somebody has rejected is never stored. Before confirming, the reviewer can
-   correct any value and add fields Document Intelligence did not return; those
-   corrections travel with the "Yes" and are what gets stored.
+   correct or top up a fixed set of reviewed fields — merchant, due date,
+   invoice total, amount due, subtotal, total tax — validated as they are
+   entered; the corrections travel with the "Yes" and are what gets stored.
+   The merchant is required: a document with none shows the field empty and
+   cannot be stored until it is filled in. Any other extracted field, including
+   a previous unpaid balance, is neither shown to the reviewer nor kept.
 7. The photo is deleted from blob storage as soon as it has been read, whether
    the analysis succeeded, failed or was rejected.
 

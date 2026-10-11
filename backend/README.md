@@ -137,6 +137,19 @@ Corrections also work on an already-stored record, which is how a value is fixed
 after a restart hands back a stored reading. Nothing about a confidence score is
 carried in a correction: a reading rewritten by a person has no meaningful score.
 
+The values a reviewer may correct are a fixed, reviewed set: the merchant, the
+due date, the invoice total, the amount due, the subtotal, and the total tax.
+Anything else Document Intelligence returns is not offered for editing. In
+particular `PreviousUnpaidBalance` is not kept by this service at all: it is
+dropped from the extraction, so it is never stored, never returned, and a
+correction naming it is ignored rather than reintroducing it.
+
+The merchant is **required**: a document with no merchant (whether the model did
+not read one, or a correction cleared it) is refused with `422` and nothing is
+stored. The reviewer is asked for a merchant until one is read or typed, so a
+row in the table always has one; this is the backstop behind the UI, which shows
+the empty merchant row and blocks the accept button for the same reason.
+
 Saying no therefore takes the result away rather than recording an opinion about
 it. It deletes every row for the partition and returns `204` with no body, so the
 caller has nothing to render. That includes a record accepted before a restart,

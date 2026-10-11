@@ -424,6 +424,151 @@ class TestAPhotoVerdict:
         assert client.delete(f"/api/invoices/{PARTITION}/photo").status_code == 204
 
 
+class TestADroppedField:
+    """PreviousUnpaidBalance is kept nowhere, by nobody.
+
+    Some invoices carry a previous balance that no reviewer is supposed to
+    confirm. The UI never offers it, and the backend filters it at every point a
+    value could enter or leave, so the field cannot be shown, stored or smuggled
+    back in through a correction.
+    """
+
+    def test_a_dropped_field_never_reaches_the_response(
+        self, client, stub_azure
+    ) -> None:
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[
+                    ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("PreviousUnpaidBalance", "50.00 EUR", 0.9),
+                    ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                ],
+            )
+        ]
+        post_photo(client)
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        names = body["documents"][0]["fields"].keys()
+        assert "PreviousUnpaidBalance" not in names
+        assert set(names) == {"VendorName", "InvoiceTotal"}
+
+    def test_a_dropped_field_is_not_stored_on_accept(
+        self, client, stub_azure, table
+    ) -> None:
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {
+                        "index": 0,
+                        "fields": {
+                            "VendorName": {"value": "Renamed"},
+                            "PreviousUnpaidBalance": {"value": "1.00 EUR"},
+                        },
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200
+        row = table.entities[(PARTITION, "doc-000")]
+        assert row["f_VendorName"] == "Renamed"
+        assert not [name for name in row if name.startswith("f_PreviousUnpaidBalance")]
+
+    def test_a_stored_dropped_field_is_filtered_from_the_response(
+        self, client, settings, table
+    ) -> None:
+        """A row written before the filter existed still never returns the field."""
+        from app.repository import save_documents
+
+        save_documents(
+            settings,
+            PARTITION,
+            BLOB,
+            [
+                ExtractedDocument(
+                    index=0,
+                    fields=[
+                        ExtractedField("VendorName", "Acme"),
+                        ExtractedField("PreviousUnpaidBalance", "50.00 EUR"),
+                    ],
+                )
+            ],
+        )
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        names = body["documents"][0]["fields"].keys()
+        assert set(names) == {"VendorName"}
+
+
+class TestAMerchantIsRequired:
+    """The record must have a merchant before it is written.
+
+    A document with no merchant is useless as an invoice record, so accepting is
+    refused until one is read or the reviewer types one. The UI renders the empty
+    merchant row and blocks the button; these tests guard the same rule at the
+    only point that writes the table.
+    """
+
+    def test_a_document_read_without_a_merchant_cannot_be_stored(
+        self, client, stub_azure, table
+    ) -> None:
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[ExtractedField("InvoiceTotal", "120.00 EUR", 0.95)],
+            )
+        ]
+        post_photo(client)
+        assert client.get(f"/api/invoices/{PARTITION}").status_code == 200
+        response = client.post(f"/api/invoices/{PARTITION}/photo")
+        assert response.status_code == 422
+        assert "merchant" in response.json()["detail"]
+        assert table.entities == {}
+
+    def test_a_correction_that_clears_the_merchant_cannot_be_stored(
+        self, client, stub_azure, table
+    ) -> None:
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {"index": 0, "fields": {"VendorName": {"value": ""}}}
+                ]
+            },
+        )
+        assert response.status_code == 422
+        assert "merchant" in response.json()["detail"]
+        assert table.entities == {}
+
+    def test_a_stored_record_needing_a_reviewer_merchant_still_won(
+        self, client, stub_azure, table
+    ) -> None:
+        """Supplying the merchant to a document that had none stores the record.
+
+        The reviewer can type the merchant that Document Intelligence misses, and
+        that is what the table keeps; the missing reading is not a dead end.
+        """
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[ExtractedField("InvoiceTotal", "120.00 EUR", 0.95)],
+            )
+        ]
+        post_photo(client)
+        response = client.post(
+            f"/api/invoices/{PARTITION}/photo",
+            json={
+                "documents": [
+                    {"index": 0, "fields": {"VendorName": {"value": "Acme"}}}
+                ]
+            },
+        )
+        assert response.status_code == 200
+        row = table.entities[(PARTITION, "doc-000")]
+        assert row["f_VendorName"] == "Acme"
+
+
 def test_a_repeated_photo_says_so(client, stub_azure) -> None:
     """The UI needs to tell "already stored" from "being read right now".
 

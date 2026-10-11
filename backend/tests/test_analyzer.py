@@ -195,6 +195,30 @@ class TestToDocuments:
         result = Result(documents=[Document(fields={})])
         assert _to_documents(result)[0].fields == []
 
+    def test_a_dropped_field_never_makes_it_out_of_extraction(self) -> None:
+        """PreviousUnpaidBalance is not kept anywhere, not even for a reviewer.
+
+        Some invoices carry a previous balance the reviewer is not trusted to
+        confirm, so it is filtered at the source: no screen, stored row or
+        response can ever contain it.
+        """
+        result = Result(
+            documents=[
+                Document(
+                    fields={
+                        "VendorName": Field(value_string="Acme"),
+                        "PreviousUnpaidBalance": Field(value_string="50.00 EUR"),
+                        "AmountDue": Field(value_string="120.00 EUR"),
+                    }
+                )
+            ]
+        )
+        documents = _to_documents(result)
+        assert [item.name for item in documents[0].fields] == [
+            "AmountDue",
+            "VendorName",
+        ]
+
 
 class TestAnalyzeGuards:
     def test_missing_endpoint_is_a_configuration_error(self) -> None:

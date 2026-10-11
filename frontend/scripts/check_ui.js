@@ -54,11 +54,36 @@ const COMPLETE_STATUS = {
       index: 0,
       confidence: 0.98,
       fields: {
-        // Deliberately contains markup: OCR output is untrusted input.
-        VendorName: { value: "Acme <b>Ltd</b>", confidence: 0.99 },
-        InvoiceDate: { value: "2026-03-01", confidence: 0.4 },
-        SomeOddFieldName: { value: "x", confidence: null },
+        // Deliberately contains markup and special characters: OCR output is
+        // untrusted input, and the review screen must keep them as text.
+        VendorName: { value: "Acme <b>Ltd</b> & Sons", confidence: 0.99 },
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        DueDate: { value: "2026-03-01", confidence: 0.4 },
+        AmountDue: { value: "120.00", confidence: 0.6 },
+        SubTotal: { value: "100.00 EUR", confidence: null },
+        // TotalTax is deliberately absent, so the add control has something to
+        // offer. PreviousUnpaidBalance is not kept anywhere by this deployment,
+        // so the review screen must not show it either.
+        PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
         EmptyField: { value: "", confidence: 0.9 },
+      },
+    },
+  ],
+};
+
+// A document the model read no merchant from. The merchant row must still be on
+// screen, empty, prompting for a value, and the document must be impossible to
+// accept until one is typed.
+const NO_MERCHANT_STATUS = {
+  status: "complete",
+  documentCount: 1,
+  documents: [
+    {
+      index: 0,
+      confidence: 0.95,
+      fields: {
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        DueDate: { value: "2026-03-01", confidence: 0.7 },
       },
     },
   ],
@@ -585,11 +610,20 @@ async function captureAndUpload(win) {
   const names = [...win.document.querySelectorAll(".fields__name")].map((n) => n.textContent);
   check("VendorName shown as Merchant", names.includes("Merchant"), names.join(" | "));
   check(
-    "unknown field names are humanised",
-    names.includes("Some Odd Field Name"),
+    "only the reviewed fields are on the screen",
+    names.join(" | ") === "Merchant | Due date | Invoice total | Amount due | Subtotal",
     names.join(" | ")
   );
-  check("empty values are omitted", !names.includes("Empty Field"), names.join(" | "));
+  check(
+    "a dropped field (previous unpaid balance) is not shown",
+    !names.includes("Previous unpaid balance"),
+    names.join(" | ")
+  );
+  check(
+    "empty non-required values are omitted",
+    names.length === 5,
+    names.join(" | ")
+  );
   check(
     "priority fields sort first",
     names.indexOf("Merchant") === 0,
@@ -600,13 +634,23 @@ async function captureAndUpload(win) {
   const merchant = values.find((input) => input.value.includes("Acme"));
   check(
     "OCR markup is escaped, not rendered",
-    !!merchant && merchant.value === "Acme <b>Ltd</b>",
+    !!merchant && merchant.value === "Acme <b>Ltd</b> & Sons",
     merchant ? merchant.value : "not found"
   );
   check(
     "every value is an editable input",
-    values.length > 0,
+    values.length === 5,
     `${values.length} input(s)`
+  );
+  check(
+    "money is shown without its currency suffix",
+    values.some((input) => input.value === "120.00"),
+    values.map((input) => input.value).join(" | ")
+  );
+  check(
+    "the due date is shown as DD/MM/YYYY",
+    values.some((input) => input.value === "01/03/2026"),
+    values.map((input) => input.value).join(" | ")
   );
   const badges = [...win.document.querySelectorAll(".confidence")].map((b) => ({
     text: b.textContent,
@@ -1057,7 +1101,15 @@ async function captureAndUpload(win) {
   check("and its result is fetched", fresh.polls.length > 0, JSON.stringify(fresh.polls));
   check("and shown", fresh.body.includes("Acme"), JSON.stringify(fresh.body));
 
-  console.log("\n--- 20. fixing a wrong or missing value before accepting ---");
+  console.log("\n--- 20. fixing, sanitising and validating fields before accepting ---");
+  const inputField = (field) => {
+    const row = [...win.document.querySelectorAll(".fields__row")]
+      .find((r) => r.dataset.field === field);
+    return row ? row.querySelector(".fields__input") : null;
+  };
+
+  // A fresh reading with a single correction: the untouched values must not
+  // travel in the corrections payload.
   win = buildDom({
     analysisApiBaseUrl: "https://analysis.example",
     statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
@@ -1066,46 +1118,24 @@ async function captureAndUpload(win) {
   await captureAndUpload(win);
   await wait(1200);
 
+  const dueDate = [...win.document.querySelectorAll(".fields__input")]
+    .find((input) => input.value === "01/03/2026");
+  check(
+    "an extracted due date is editable",
+    !!dueDate && dueDate instanceof win.HTMLInputElement,
+    valuesOnScreen(win)
+  );
+  if (dueDate) {
+    dueDate.value = "01/04/2026";
+    dueDate.dispatchEvent(new win.Event("input"));
+  }
   // Correcting an extracted value withdraws its confidence badge: the score
   // described the reading, not the value the user just typed.
-  const dateInput = [...win.document.querySelectorAll(".fields__input")]
-    .find((input) => input.value === "2026-03-01");
-  check("an extracted value is an editable input", !!dateInput, valuesOnScreen(win));
-  if (dateInput) {
-    dateInput.value = "2026-04-01";
-    dateInput.dispatchEvent(new win.Event("input"));
-  }
   check(
     "editing a value withdraws its confidence badge",
-    !!dateInput &&
-      dateInput.closest(".fields__value").querySelector(".confidence").hidden === true
+    !!dueDate &&
+      dueDate.closest(".fields__value").querySelector(".confidence").hidden === true
   );
-
-  // Adding a field Document Intelligence did not return. COMPLETE_STATUS already
-  // contains VendorName, so InvoiceId is the one that is missing.
-  const addSelect = win.document.querySelector(".fields__add-select");
-  const addInput = win.document.querySelector(".fields__add-input");
-  const addButton = win.document.querySelector(".fields__add-button");
-  check(
-    "the add-a-missing-field control is offered",
-    !!addSelect && !!addInput && !!addButton
-  );
-  addSelect.value = "InvoiceId";
-  addInput.value = "INV-42";
-  addButton.click();
-  await tick();
-  const addedRow = [...win.document.querySelectorAll(".fields__row")]
-    .find((row) => row.dataset.field === "InvoiceId");
-  check("the added field appears", !!addedRow, valuesOnScreen(win));
-  check(
-    "with the value that was typed",
-    !!addedRow && addedRow.querySelector(".fields__input").value === "INV-42"
-  );
-  check(
-    "and the field is not offered for a second add",
-    ![...addSelect.options].some((option) => option.value === "InvoiceId")
-  );
-
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const accepted = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1114,22 +1144,150 @@ async function captureAndUpload(win) {
     !!accepted && accepted.method === "POST" && typeof accepted.body === "string",
     JSON.stringify(accepted)
   );
-  let payload = {};
+  let correctedFields = {};
   try {
-    payload = JSON.parse(accepted.body);
+    const payload = JSON.parse(accepted.body);
+    correctedFields = ((payload.documents || [])[0] || {}).fields || {};
   } catch {
     // Reported by the check below.
   }
-  const correctedFields = ((payload.documents || [])[0] || {}).fields || {};
   check(
-    "the corrections include the added value",
-    !!correctedFields.InvoiceId && correctedFields.InvoiceId.value === "INV-42",
+    "the corrections carry the edited date",
+    correctedFields.DueDate && correctedFields.DueDate.value === "01/04/2026",
     JSON.stringify(correctedFields)
   );
   check(
-    "and the edited value",
-    !!correctedFields.InvoiceDate && correctedFields.InvoiceDate.value === "2026-04-01",
+    "and nothing the reviewer left alone",
+    !correctedFields.VendorName && !correctedFields.InvoiceTotal &&
+      !correctedFields.AmountDue && !correctedFields.SubTotal,
     JSON.stringify(correctedFields)
+  );
+
+  // Text cannot be typed into a money field, and whatever is pasted is
+  // sanitised into a number the moment it lands in the input.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+
+  const money = [...win.document.querySelectorAll(".fields__input")]
+    .find((input) => input.value === "120.00");
+  check(
+    "money is shown as a bare two-decimal number",
+    !!money,
+    valuesOnScreen(win)
+  );
+  if (money) {
+    money.value = "abc129.50xyz";
+    money.dispatchEvent(new win.Event("input"));
+  }
+  check(
+    "letters typed into a money field are stripped",
+    inputField("InvoiceTotal").value === "129.50",
+    inputField("InvoiceTotal").value
+  );
+  check(
+    "a pasted command is reduced to its numbers/dots",
+    !/abc|xyz|<|>|&/.test(inputField("InvoiceTotal").value),
+    inputField("InvoiceTotal").value
+  );
+
+  // The merchant keeps exactly what was read until edited, and then only
+  // letters, numbers and spaces survive: no markup, no command syntax.
+  const merchantInput = inputField("VendorName");
+  check(
+    "an untouched merchant keeps exactly what was read",
+    merchantInput.value === "Acme <b>Ltd</b> & Sons",
+    merchantInput.value
+  );
+  merchantInput.value = "Acme <script>x</script> Ltd!";
+  merchantInput.dispatchEvent(new win.Event("input"));
+  check(
+    "markup and punctuation are stripped from a merchant",
+    merchantInput.value === "Acme scriptxscript Ltd" && !/[<>&'"]/.test(merchantInput.value),
+    merchantInput.value
+  );
+
+  // Adding a missing field (TotalTax). Malformed values are refused outright,
+  // so a missing field is added with one good value or not at all.
+  const addSelect = win.document.querySelector(".fields__add-select");
+  const addInput = win.document.querySelector(".fields__add-input");
+  const addButton = win.document.querySelector(".fields__add-button");
+  check(
+    "the add control offers only the missing field",
+    !!addSelect && !!addButton &&
+      [...addSelect.options].some((option) => option.value === "TotalTax"),
+    valuesOnScreen(win)
+  );
+  addSelect.value = "TotalTax";
+  addInput.value = "12.5"; // needs two decimals
+  addButton.click();
+  await tick();
+  check(
+    "a malformed value is refused when adding a field",
+    inputField("TotalTax") === null &&
+      /Total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  addInput.value = "12.50";
+  addButton.click();
+  await tick();
+  check(
+    "a valid added field appears with the typed value",
+    inputField("TotalTax") && inputField("TotalTax").value === "12.50",
+    valuesOnScreen(win)
+  );
+  check(
+    "and is not offered a second time",
+    ![...addSelect.options].some((option) => option.value === "TotalTax")
+  );
+  check(
+    "the add control is hidden once nothing is missing",
+    !!win.document.querySelector(".fields__add").hidden
+  );
+
+  // Accepting while an edited value does not fit is refused, not sent.
+  const tax = inputField("TotalTax");
+  tax.value = "12.";
+  tax.dispatchEvent(new win.Event("input"));
+  const decisionsBefore = win.__fetchStub.decisions.length;
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "accepting an edited value that does not fit is refused",
+    win.__fetchStub.decisions.length === decisionsBefore &&
+      /Total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  tax.value = "12.50";
+  tax.dispatchEvent(new win.Event("input"));
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const clean = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let cleanFields = {};
+  try {
+    cleanFields = ((JSON.parse(clean.body).documents || [])[0] || {}).fields || {};
+  } catch {
+    // Reported by the check below.
+  }
+  check(
+    "the cleaned money travels in the corrections",
+    cleanFields.TotalTax && cleanFields.TotalTax.value === "12.50",
+    JSON.stringify(cleanFields)
+  );
+  check(
+    "and the cleaned merchant does",
+    cleanFields.VendorName &&
+      cleanFields.VendorName.value === "Acme scriptxscript Ltd",
+    JSON.stringify(cleanFields)
+  );
+  check(
+    "while untouched values stay off the wire",
+    !cleanFields.AmountDue && !cleanFields.SubTotal,
+    JSON.stringify(cleanFields)
   );
 
   // Removing an added field takes it back out of the corrections.
@@ -1141,13 +1299,13 @@ async function captureAndUpload(win) {
   await captureAndUpload(win);
   await wait(1200);
   const s2 = win.document.querySelector(".fields__add-select");
-  s2.value = "InvoiceId";
-  win.document.querySelector(".fields__add-input").value = "INV-99";
+  s2.value = "TotalTax";
+  win.document.querySelector(".fields__add-input").value = "12.50";
   win.document.querySelector(".fields__add-button").click();
   await tick();
-  const removedRow = [...win.document.querySelectorAll(".fields__row")]
-    .find((row) => row.dataset.field === "InvoiceId");
-  removedRow.querySelector(".fields__remove").click();
+  const addedRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "TotalTax");
+  addedRow.querySelector(".fields__remove").click();
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const afterRemove = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1160,11 +1318,89 @@ async function captureAndUpload(win) {
   const remaining = ((removedPayload.documents || [])[0] || {}).fields || {};
   check(
     "a removed field is left out of the corrections",
-    !remaining.InvoiceId,
+    !remaining.TotalTax,
     JSON.stringify(remaining)
   );
 
-  console.log("\n--- 21. the same editing works for an uploaded photo ---");
+  console.log("\n--- 20b. a missing merchant is required, not optional ---");
+  // A document Document Intelligence read no merchant from shows the merchant
+  // row empty and prompting. It is not hidden away in the add control, and the
+  // document cannot be stored until the reviewer types one.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...NO_MERCHANT_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+
+  const merchantRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "VendorName");
+  const merchantBox = merchantRow && merchantRow.querySelector(".fields__input");
+  const merchantError = merchantRow && merchantRow.querySelector(".fields__error");
+  check(
+    "a missing merchant is shown as an empty editable row",
+    !!merchantBox && merchantBox.value === "",
+    valuesOnScreen(win)
+  );
+  check(
+    "labelled Merchant, ready to type into",
+    !!merchantRow &&
+      merchantRow.querySelector(".fields__name").textContent === "Merchant",
+    valuesOnScreen(win)
+  );
+  check(
+    "with a prompt that it is required",
+    !!merchantError && !merchantError.hidden &&
+      /required/i.test(merchantError.textContent),
+    merchantError ? merchantError.textContent : "no error row"
+  );
+  const merchantOffered = [...win.document.querySelectorAll(".fields__add-select")]
+    .flatMap((select) => [...select.options])
+    .some((option) => option.value === "VendorName");
+  check(
+    "and not offered in the add control",
+    !merchantOffered,
+    valuesOnScreen(win)
+  );
+  const blockedDecisions = win.__fetchStub.decisions.length;
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "accepting without a merchant is refused",
+    win.__fetchStub.decisions.length === blockedDecisions &&
+      /merchant/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  merchantBox.value = "New Vendor Ltd";
+  merchantBox.dispatchEvent(new win.Event("input"));
+  check(
+    "typing one withdraws the prompt",
+    !merchantError.hidden === false,
+    merchantError.textContent
+  );
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const merchantDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let merchantPayload = {};
+  try {
+    merchantPayload = JSON.parse(merchantDecision.body);
+  } catch {
+    // Reported by the check below.
+  }
+  const merchantFields = ((merchantPayload.documents || [])[0] || {}).fields || {};
+  check(
+    "with a merchant typed it is stored",
+    merchantFields.VendorName && merchantFields.VendorName.value === "New Vendor Ltd",
+    JSON.stringify(merchantFields)
+  );
+  check(
+    "and the untouched values still stay off the wire",
+    !merchantFields.InvoiceTotal && !merchantFields.DueDate,
+    JSON.stringify(merchantFields)
+  );
+
+  console.log("\n--- 21. the same editing and validation works for an uploaded photo ---");
   // The upload path must offer exactly the same correction controls as the
   // camera path: both reach the same review screen, so there is no reason for
   // an uploaded invoice to be fixed by hand and a photographed one not.
@@ -1179,10 +1415,10 @@ async function captureAndUpload(win) {
   win.document.getElementById("upload").click();
   await wait(1200);
 
-  const inputs = win.document.querySelectorAll(".fields__input");
+  const uploadInputs = win.document.querySelectorAll(".fields__input");
   check(
     "an uploaded photo's fields are editable too",
-    inputs.length > 0,
+    uploadInputs.length > 0,
     valuesOnScreen(win)
   );
   check(
@@ -1191,12 +1427,12 @@ async function captureAndUpload(win) {
     valuesOnScreen(win)
   );
 
-  [...inputs].find((input) => input.value === "2026-03-01").value = "2026-05-05";
-  [...inputs].find((input) => input.value === "2026-05-05")
-    .dispatchEvent(new win.Event("input"));
+  const due = [...uploadInputs].find((input) => input.value === "01/03/2026");
+  due.value = "01/05/2026";
+  due.dispatchEvent(new win.Event("input"));
   const uploadAddSelect = win.document.querySelector(".fields__add-select");
-  uploadAddSelect.value = "InvoiceId";
-  win.document.querySelector(".fields__add-input").value = "INV-77";
+  uploadAddSelect.value = "TotalTax";
+  win.document.querySelector(".fields__add-input").value = "12.50";
   win.document.querySelector(".fields__add-button").click();
   await tick();
   win.document.getElementById("photoOkay").click();
@@ -1211,12 +1447,12 @@ async function captureAndUpload(win) {
   const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
   check(
     "accepting an uploaded photo sends its corrections",
-    uploadFields.InvoiceId && uploadFields.InvoiceId.value === "INV-77",
+    uploadFields.TotalTax && uploadFields.TotalTax.value === "12.50",
     JSON.stringify(uploadFields)
   );
   check(
-    "including the edited value",
-    uploadFields.InvoiceDate && uploadFields.InvoiceDate.value === "2026-05-05",
+    "including the edited due date",
+    uploadFields.DueDate && uploadFields.DueDate.value === "01/05/2026",
     JSON.stringify(uploadFields)
   );
 

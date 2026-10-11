@@ -87,10 +87,11 @@ node scripts/check_ui.js
 It walks the whole flow (load → choose → capture/pick → submit → results, plus a
 denied-permission case and a rejected submission) and asserts what is on screen
 at each step. It also covers the analysis panel: results appearing while
-analysis runs, field labels and confidence badges, editing a value and adding a
-missing field before accepting, the failure state, the keep-or-discard question
-in each of its states, stale polling being cancelled by a retake, and submission
-being refused when no backend is configured. The script prints `SKIP` if jsdom
+analysis runs, field labels and confidence badges, editing and adding values
+with their validation (money and merchant sanitising, malformed additions being
+refused), the failure state, the keep-or-discard question in each of its states,
+stale polling being cancelled by a retake, and submission being refused when no
+backend is configured. The script prints `SKIP` if jsdom
 is not installed, so it is safe to call in a pipeline.
 
 ### Testing the camera on a desktop
@@ -157,10 +158,38 @@ way.
 ### Correcting a reading
 
 Document Intelligence reads some fields wrong and misses others — a merchant is
-a common omission. Every value is therefore an editable input, and each invoice
-offers an **Add a missing field** control listing the fields the model can return
-but did not. Editing a value withdraws its confidence badge, because the score
-described the automatic reading, not what the reviewer typed.
+a common omission. The review screen shows a fixed set of fields that a person
+is trusted to correct or add, and nothing else:
+
+| Field | Shown as | Accepts |
+| ----- | -------- | ------- |
+| `VendorName` | Merchant | letters, numbers and spaces |
+| `DueDate` | Due date | a date, shown and entered as `DD/MM/YYYY` |
+| `InvoiceTotal` | Invoice total | an amount with two decimals, shown as a bare number |
+| `AmountDue` | Amount due | an amount with two decimals, shown as a bare number |
+| `SubTotal` | Subtotal | an amount with two decimals, shown as a bare number |
+| `TotalTax` | Total tax | an amount with two decimals, shown as a bare number |
+
+Any other extracted field is kept out of the review screen; the previous unpaid
+balance in particular is never shown or stored by the service. Money is shown
+without its currency suffix and dates as `DD/MM/YYYY`, because that is how the
+value will need to be typed again.
+
+The merchant is **required**. A document whose merchant was not read shows the
+Merchant row empty, labelled with a "required" prompt, ready to type into —
+it is never squirrelled away in the add control — and the document cannot be
+accepted until the field holds a value. The backend enforces the same rule, so
+nothing is stored without one.
+
+Every value is an **editable input**, and each invoice offers an **Add a missing
+field** control listing the reviewable fields the model did not return. Values
+are constrained as they are typed or pasted (money strips letters, a merchant
+strips markup and punctuation, a date accepts digits only), an added field must
+be valid before it becomes a row, and accepting is refused while an edited value
+does not fit. Nothing is kept off by wanting to type "*120.00 EUR*": only the
+bare number is accepted, because the two decimals are the exactness invoice
+values are matched on. Editing a value withdraws its confidence badge, because
+the score described the automatic reading, not what the reviewer typed.
 
 The corrections travel with the **Yes, it is readable** answer as a JSON body on
 `POST /api/invoices/{id}/photo`, and the backend merges them over the extracted
