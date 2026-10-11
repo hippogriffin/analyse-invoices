@@ -102,24 +102,34 @@ def table_service(settings: Settings | None = None) -> TableServiceClient:
     )
 
 
-def table_client(settings: Settings | None = None) -> TableClient:
-    return table_service(settings).get_table_client(settings.result_table_name)
+def table_client(
+    settings: Settings | None = None, table_name: str | None = None
+) -> TableClient:
+    settings = settings or get_settings()
+    return table_service(settings).get_table_client(
+        table_name or settings.result_table_name
+    )
 
 
 def ensure_table(settings: Settings | None = None) -> None:
-    """Create the results table if it is missing.
+    """Create the tables the service writes to, if they are missing.
 
-    The failure is logged rather than raised: startup should still complete, and
+    Both the results table and the monthly-usage table are created here: the
+    service reads the usage table on every status call, so it has to exist from
+    the start rather than only once the first analysis finishes.
+
+    A failure is logged rather than raised: startup should still complete, and
     the first write reports the real cause. It used to be swallowed at debug
     level, which made a missing table look like a successful setup.
     """
     settings = settings or get_settings()
-    try:
-        # create_table_if_not_exists is on the service client, not the table client.
-        table_service(settings).create_table_if_not_exists(settings.result_table_name)
-    except Exception:
-        logger.warning(
-            "Could not create table %r; writes will fail until it exists",
-            settings.result_table_name,
-            exc_info=True,
-        )
+    for table_name in (settings.result_table_name, settings.usage_table_name):
+        try:
+            # create_table_if_not_exists is on the service client, not the table client.
+            table_service(settings).create_table_if_not_exists(table_name)
+        except Exception:
+            logger.warning(
+                "Could not create table %r; writes will fail until it exists",
+                table_name,
+                exc_info=True,
+            )

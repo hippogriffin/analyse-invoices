@@ -169,6 +169,41 @@ anything. A storage failure while accepting returns `502` and keeps the result i
 memory, so the reviewer can accept again once the table is back rather than
 paying for a second analysis.
 
+### The monthly allowance
+
+Document Intelligence bills per page analysed, so every analysis that runs costs
+money whether or not the reviewer keeps the result. The status response therefore
+reports how much of the month's allowance is left, alongside the reading:
+
+```json
+{"monthlyAllowance": 500, "documentsUsed": 1, "documentsRemaining": 499}
+```
+
+The result table cannot answer this: it records only accepted invoices, while the
+count has to include a photo that was read and then rejected. The tally lives in
+its own table (`USAGE_TABLE_NAME`, default `usage`) as **one row per analysis
+run**, under a partition named for the month (`2026-10`). Rows are only ever
+added, never amended, so two analyses finishing at the same moment cannot lose
+one another's increment the way a read-modify-write counter would; the count for a
+month is the number of rows in its partition.
+
+- The run is recorded when the analysis succeeds, before the reviewer is asked
+  about the photo, because the money is already spent by then. Rejecting the
+  reading does not give it back.
+- A repeated photo is not re-analysed, so it does not spend the allowance twice,
+  and a failed analysis never counts at all.
+- The count is read from storage on every status call, so it survives a restart
+  and is the same from any replica.
+- A usage table that cannot be read leaves the three fields out of the response
+  rather than guessing, and a usage write that fails is logged without failing
+  the reading — an under-count is better than losing a paid-for extraction.
+
+`MONTHLY_DOCUMENT_ALLOWANCE` (default `500`, matching the Document Intelligence
+free tier) is what the remaining figure is measured against. It is **reported,
+not enforced**: the service still analyses whatever it is sent, so this is a
+figure for a person to watch, not a hard quota. Making it a limit would mean
+refusing a photo the reviewer has already been charged for elsewhere.
+
 ### What a restart costs
 
 A reading that has not been accepted lives only in this process. A restart loses
@@ -274,6 +309,8 @@ Copy `.env.example` to `.env`. The settings that matter:
 | `MAX_UPLOAD_BYTES`                | `10485760`                     | Largest accepted photo (10 MB) |
 | `ALLOWED_CONTENT_TYPES`           | `image/jpeg,image/png,image/webp` | Accepted image types |
 | `RESULT_TABLE_NAME`               | `invoices`                     | Table holding successful readings |
+| `USAGE_TABLE_NAME`                | `usage`                        | Table counting analysis runs, for the monthly allowance |
+| `MONTHLY_DOCUMENT_ALLOWANCE`      | `500`                          | Documents that may be analysed per calendar month |
 | `DOCUMENT_INTELLIGENCE_ENDPOINT`  | –                              | Resource endpoint. Empty means `503` |
 | `DOCUMENT_INTELLIGENCE_MODEL`     | `prebuilt-invoice`             | Analysis model |
 | `ANALYSIS_TIMEOUT_SECONDS`        | `120`                          | How long to wait for the analyze operation |
@@ -306,7 +343,7 @@ starting without them is an error rather than a runtime surprise.
 In Azure, the identity needs:
 
 - **Storage Blob Data Contributor** on the source container
-- **Storage Table Data Contributor** on the results table
+- **Storage Table Data Contributor** on the results and usage tables
 - **Cognitive Services User** on the Document Intelligence resource
 
 ## API
@@ -321,6 +358,12 @@ In Azure, the identity needs:
 | `GET`  | `/healthz`                  | Liveness                                 |
 
 `status` is one of `pending`, `processing`, `complete` or `failed`.
+
+The status response also carries the month's allowance: `monthlyAllowance`,
+`documentsUsed` and `documentsRemaining`. Every analysis run spends one, so the
+figures are the same for a reading that is still on screen, one that was accepted
+and one that was rejected. They are omitted only when the usage table cannot be
+read. See [The monthly allowance](#the-monthly-allowance).
 
 A reading that has not been accepted yet is reported as `complete` with its
 documents from memory, so the reviewer has something to be asked about.

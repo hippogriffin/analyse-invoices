@@ -1120,3 +1120,16 @@ def test_the_service_worker_never_caches_the_api():
     assert 'request.method !== "GET"' in SERVICE_WORKER, (
         "the service worker must only handle GETs; uploads are POSTs"
     )
+
+
+def test_the_remaining_allowance_has_a_place_in_the_results():
+    """The status response carries how much of the month's allowance is left;
+    the page needs an element to show it in, and it must start hidden so an
+    allowance-less result does not flash an empty line."""
+    element = re.search(r"<p[^>]*id=\"resultsAllowance\"[^>]*>", HTML, re.S)
+    assert element, "index.html must have a #resultsAllowance element"
+    assert "hidden" in element.group(0), "the allowance line must start hidden"
+    assert "resultsAllowance" in APP_JS, "app.js must render the allowance line"
+    assert "monthlyAllowance" in APP_JS, (
+        "app.js must read the allowance from the status response"
+    )

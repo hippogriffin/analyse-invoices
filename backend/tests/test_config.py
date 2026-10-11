@@ -291,3 +291,23 @@ class TestUploadLimits:
         assert Settings(cors_allow_origins="HTTPS://App.Example.com").cors_allow_origins == (
             "HTTPS://App.Example.com",
         )
+
+
+class TestMonthlyAllowance:
+    """The allowance the status response reports against."""
+
+    def test_default_allowance(self) -> None:
+        assert Settings().monthly_document_allowance == 500
+
+    def test_allowance_is_configurable(self) -> None:
+        assert Settings(monthly_document_allowance=42).monthly_document_allowance == 42
+
+    def test_a_negative_allowance_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Settings(monthly_document_allowance=-1)
+
+    def test_default_usage_table(self) -> None:
+        assert Settings().usage_table_name == "usage"
+
+    def test_usage_table_is_configurable(self) -> None:
+        assert Settings(usage_table_name="counts").usage_table_name == "counts"

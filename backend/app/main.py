@@ -50,6 +50,7 @@ from app.repository import (
     save_documents,
 )
 from app.storage import PhotoStorageError, delete_photo, store_photo
+from app.usage import UsageError, analyses_this_month, record_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,16 @@ def create_app() -> FastAPI:
         try:
             state.processing(partition)
             documents = analyze(settings, download_photo(settings, blob_name))
+            # Count the run against the month's allowance now that it has
+            # happened. It is spent whatever the reviewer decides next, so it is
+            # recorded before the result is held rather than when it is accepted.
+            # A failure to record it is logged and ignored: the reading
+            # succeeded, and losing it because the tally could not be written
+            # would be worse than an under-count.
+            try:
+                record_analysis(settings)
+            except UsageError as exc:
+                logger.warning("Could not record the monthly analysis usage: %s", exc)
             # Nothing is written here. The values are only worth keeping if the
             # reviewer accepts the reading, so the result waits in memory until
             # they answer, and the table learns nothing about a photo that is
@@ -312,6 +323,21 @@ def create_app() -> FastAPI:
         # before the filter existed, and the held state forgets nothing it
         # already had.
         body["documents"] = _only_stored_fields(body["documents"])
+        # How much of the month's allowance is left. Every analysis run spends
+        # one, so this is the same answer whether the result was accepted,
+        # rejected or is still on screen. It is read from storage rather than
+        # held in the process, because it has to survive a restart to be worth
+        # showing at all. A usage table that cannot be read leaves the fields
+        # absent, so the UI says nothing rather than inventing a number.
+        try:
+            used = analyses_this_month(settings)
+        except UsageError as exc:
+            logger.warning("Could not read the monthly analysis usage: %s", exc)
+        else:
+            allowance = settings.monthly_document_allowance
+            body["monthlyAllowance"] = allowance
+            body["documentsUsed"] = used
+            body["documentsRemaining"] = max(allowance - used, 0)
         return InvoiceStatusOut.model_validate(body)
 
     @app.get(

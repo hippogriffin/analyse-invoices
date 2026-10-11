@@ -100,7 +100,8 @@ at each step. It also covers the framing: the zoom slider enlarging the live
 preview and the captured photo being the zoomed centre of the frame, and the
 crop tool resizing and moving its selection and applying exactly that region.
 It also covers the analysis panel: results appearing while
-analysis runs, field labels and confidence badges, editing and adding values
+analysis runs, field labels and confidence badges, the remaining-monthly-allowance
+line, editing and adding values
 with their validation (money and merchant sanitising, malformed additions being
 refused), the failure state, the keep-or-discard question in each of its states,
 stale polling being cancelled by a retake, and submission being refused when no
@@ -190,6 +191,17 @@ is live in the process that produced them, so after a service restart the fields
 are still there but the badges are absent — the UI omits them rather than showing
 a stale number. A field with no confidence is rendered without a badge either
 way.
+
+### The remaining monthly allowance
+
+Every analysis costs one against a monthly Document Intelligence allowance, and
+the results panel says how much is left — *"499 of 500 documents left this
+month."* The number comes from the backend, which reads it from its usage table on
+every status call, so it survives a restart and counts a photo that was read and
+then rejected, because that run was billed either way. It is shown next to the
+result, not enforced: a reading still goes ahead at zero. When the backend cannot
+read the usage it omits the fields entirely, and the panel shows no line rather
+than inventing a figure.
 
 ### Correcting a reading
 

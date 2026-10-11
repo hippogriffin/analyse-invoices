@@ -48,7 +48,9 @@ chosen photo over the network, so it holds no credentials of any kind.
    someone is reading the result.
 5. The browser polls `GET /api/invoices/{id}` (through the frontend proxy) and
    renders the fields, with per-field confidence so a low-confidence reading is
-   visible at a glance, then asks whether the photo was good enough.
+   visible at a glance, then asks whether the photo was good enough. The same
+   response carries how much of the month's analysis allowance is left, which the
+   panel shows next to the result.
 6. **The record is created only on "Upload my invoice"**, which is the single
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
@@ -156,9 +158,12 @@ default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 ## Testing
 
 ```bash
-(cd frontend && ../backend/.venv/bin/python -m pytest)  # 86 checks
-(cd backend  && .venv/bin/python -m pytest)  # 219 checks
-node frontend/scripts/check_ui.js            # 199 DOM checks, needs: npm install jsdom
+(cd frontend && ../backend/.venv/bin/python -m pytest)  # 87 checks
+(cd backend  && .venv/bin/python -m pytest)  # 256 checks
+node frontend/scripts/check_ui.js            # 202 DOM checks, needs: npm install jsdom
 ```
 
-No suite contacts Azure, and none depends on a local `.env`.
+No suite contacts Azure, and none depends on a local `.env`. One backend
+SDK-contract check (`test_sdk_contract.py::test_upload_blob_call_uses_only_real_parameters`)
+can fail against an SDK built for a different package layout; deselect it if your
+environment hits that.

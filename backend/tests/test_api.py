@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import main as main_module
+from app import usage as usage_module
 from app.analyzer import AnalysisError
 from app.config import JobStatus
 from app.job_state import get_job_state
@@ -21,6 +22,7 @@ from app.storage import PhotoStorageError
 PHOTO = b"\xff\xd8\xff-not-a-real-jpeg"
 OTHER_PHOTO = b"\x89PNG\r\n\x1a\n-a-different-photo"
 PARTITION = dedupe_key(PHOTO)
+OTHER_PARTITION = dedupe_key(OTHER_PHOTO)
 BLOB = f"2026/{PARTITION}.jpg"
 
 
@@ -85,8 +87,9 @@ def test_startup_creates_the_results_table(client, table_service) -> None:
 
     TableClient has no create_table_if_not_exists method, and the failure was
     swallowed, so a missing table silently looked like a successful startup.
+    The usage table is created too, because the status call reads it.
     """
-    assert table_service.created_tables == ["invoices"]
+    assert table_service.created_tables == ["invoices", "usage"]
 
 
 def test_ensure_table_logs_instead_of_raising(
@@ -1119,3 +1122,91 @@ def test_two_submissions_of_one_photo_analyse_it_once(client, stub_azure, monkey
     assert int(stub_azure["runs"]) == 1, (
         f"the photo was analysed {stub_azure['runs']} times"
     )
+
+
+class TestMonthlyAllowance:
+    """How much of the month's analysis allowance is left.
+
+    Document Intelligence bills per page analysed, so every run spends one
+    whether or not the reviewer keeps the result. The status response carries the
+    allowance, what is spent and what is left, so the reviewer can see how much
+    they have to spend.
+    """
+
+    def test_the_status_reports_the_remaining_allowance(
+        self, client, stub_azure
+    ) -> None:
+        post_photo(client)
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        assert body["monthlyAllowance"] == 500
+        assert body["documentsUsed"] == 1
+        assert body["documentsRemaining"] == 499
+
+    def test_the_analysis_spends_the_allowance_before_it_is_accepted(
+        self, client, stub_azure
+    ) -> None:
+        """The reading is unreviewed and unstored, but it has already been paid for."""
+        post_photo(client)
+        held = client.get(f"/api/invoices/{PARTITION}").json()
+        assert held["documentsRemaining"] == 499
+        client.post(f"/api/invoices/{PARTITION}/photo")
+        accepted = client.get(f"/api/invoices/{PARTITION}").json()
+        assert accepted["documentsUsed"] == 1, "accepting is not a second analysis"
+
+    def test_a_repeated_photo_does_not_spend_the_allowance_again(
+        self, client, stub_azure
+    ) -> None:
+        post_photo(client)
+        post_photo(client)
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        assert body["documentsUsed"] == 1
+
+    def test_a_rejected_photo_still_spent_the_allowance(
+        self, client, stub_azure
+    ) -> None:
+        post_photo(client)
+        client.delete(f"/api/invoices/{PARTITION}/photo")
+        post_photo(client, photo=OTHER_PHOTO)
+        body = client.get(f"/api/invoices/{OTHER_PARTITION}").json()
+        assert body["documentsUsed"] == 2, "a rejected run was still a run"
+        assert body["documentsRemaining"] == 498
+
+    def test_a_failed_analysis_is_not_counted(self, client, stub_azure) -> None:
+        stub_azure["error"] = "the model returned nothing"
+        post_photo(client)
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        assert body["status"] == "failed"
+        assert body["documentsUsed"] == 0
+        assert body["documentsRemaining"] == 500
+
+    def test_a_usage_write_failure_does_not_lose_the_reading(
+        self, client, stub_azure, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class BrokenTable:
+            def upsert_entity(self, entity: dict) -> None:
+                raise RuntimeError("no permission")
+
+        monkeypatch.setattr(
+            usage_module, "table_client", lambda *_a, **_k: BrokenTable()
+        )
+        post_photo(client)
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        assert body["status"] == "complete"
+        assert body["documents"][0]["fields"]["VendorName"]["value"] == "Acme"
+
+    def test_status_answers_without_an_allowance_when_usage_cannot_be_read(
+        self, client, stub_azure, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        post_photo(client)
+
+        class BrokenTable:
+            def query_entities(self, *args: object, **kwargs: object):
+                raise RuntimeError("down")
+
+        monkeypatch.setattr(
+            usage_module, "table_client", lambda *_a, **_k: BrokenTable()
+        )
+        body = client.get(f"/api/invoices/{PARTITION}").json()
+        assert body["status"] == "complete"
+        assert body["monthlyAllowance"] is None
+        assert body["documentsRemaining"] is None

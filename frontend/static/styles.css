@@ -424,6 +424,12 @@ body {
   margin: 0;
 }
 
+.results__allowance {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
 .results__document {
   border-top: 1px solid var(--surface-soft);
   padding-top: 10px;

@@ -49,6 +49,8 @@ function snapshot(win, label) {
 const COMPLETE_STATUS = {
   status: "complete",
   documentCount: 1,
+  monthlyAllowance: 500,
+  documentsRemaining: 499,
   documents: [
     {
       index: 0,
@@ -813,6 +815,17 @@ async function captureAndUpload(win) {
     /1 invoice found/.test(win.document.getElementById("resultsMessage").textContent),
     win.document.getElementById("resultsMessage").textContent
   );
+  check(
+    "the remaining monthly allowance is shown with the result",
+    win.document.getElementById("resultsAllowance").textContent ===
+      "499 of 500 documents left this month.",
+    win.document.getElementById("resultsAllowance").textContent
+  );
+  check(
+    "the allowance line is visible once an analysis is done",
+    !win.document.getElementById("resultsAllowance").hidden,
+    String(win.document.getElementById("resultsAllowance").hidden)
+  );
 
   const names = [...win.document.querySelectorAll(".fields__name")].map((n) => n.textContent);
   check("VendorName shown as Merchant", names.includes("Merchant"), names.join(" | "));
@@ -911,6 +924,13 @@ async function captureAndUpload(win) {
     "the submission itself is still reported as accepted",
     /sent/i.test(win.document.getElementById("status").textContent),
     win.document.getElementById("status").textContent
+  );
+  check(
+    "no allowance line when the service did not report one",
+    win.document.getElementById("resultsAllowance").hidden &&
+      win.document.getElementById("resultsAllowance").textContent === "",
+    `${win.document.getElementById("resultsAllowance").hidden} / ` +
+      win.document.getElementById("resultsAllowance").textContent
   );
 
   console.log("\n--- 9. a new photo discards stale analysis ---");
