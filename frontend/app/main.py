@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-app = FastAPI(title="Invoice Upload", version="0.1.0")
+app = FastAPI(title="Analyse Invoices", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(invoices_router)
 

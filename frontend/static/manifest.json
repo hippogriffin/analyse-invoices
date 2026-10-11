@@ -1,6 +1,6 @@
 {
   "id": "/",
-  "name": "Invoice Upload",
+  "name": "Analyse Invoices",
   "short_name": "Invoices",
   "description": "Photograph an invoice and read its fields.",
   "start_url": "/",
