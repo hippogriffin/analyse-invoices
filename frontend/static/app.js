@@ -23,8 +23,12 @@
     retry: document.getElementById("retry"),
     capture: document.getElementById("capture"),
     retake: document.getElementById("retake"),
+    crop: document.getElementById("crop"),
     upload: document.getElementById("upload"),
     reviewActions: document.getElementById("reviewActions"),
+    zoomControl: document.getElementById("zoomControl"),
+    zoomSlider: document.getElementById("zoomSlider"),
+    zoomValue: document.getElementById("zoomValue"),
     progress: document.getElementById("progress"),
     progressBar: document.getElementById("progressBar"),
     status: document.getElementById("status"),
@@ -46,6 +50,15 @@
     photo: null,
     photoUrl: null,
     mirror: false,
+    // 1..MAX_ZOOM, applied as a digital centre crop so the invoice fills the
+    // frame while it is being captured.
+    zoom: 1,
+    // The crop selection as a percentage of the photo, plus the pointer
+    // session that is dragging or resizing it.
+    cropRect: null,
+    cropCorner: null,
+    cropStart: null,
+    crop: null,
     analysisConfigured: false,
     maxUploadBytes: 0,
     allowedContentTypes: [],
@@ -68,6 +81,13 @@
   const ANALYSIS_DEADLINE_MS = 180000;
   const POLL_MIN_MS = 500;
   const POLL_MAX_MS = 4000;
+
+  // Digital zoom is applied as a centre crop at capture time. More than this
+  // starts looking soft even on a sharp photo.
+  const MAX_ZOOM = 3;
+  // The crop selection can be shrunk no further than this percentage of the
+  // photo, so it never collapses to a sliver by accident.
+  const MIN_CROP_PERCENT = 10;
 
   // The only fields a reviewer may correct, and the exact kind of value each may
   // hold. VendorName reads as "Merchant" to match the existing downstream
@@ -136,6 +156,10 @@
     els.fileInput.addEventListener("change", onFilePicked);
     els.capture.addEventListener("click", capturePhoto);
     els.retake.addEventListener("click", retake);
+    els.crop.addEventListener("click", openCrop);
+    els.zoomSlider.addEventListener("input", () =>
+      setZoom(Number(els.zoomSlider.value))
+    );
     els.upload.addEventListener("click", uploadPhoto);
     els.retry.addEventListener("click", () => startCamera({ waitScreen: true }));
     els.photoOkay.addEventListener("click", () => sendVerdict(true));
@@ -168,6 +192,9 @@
     els.modePicker.hidden = true;
     els.workbench.hidden = false;
     if (mode === "upload") return enterUploadMode();
+    // A fresh start from the chooser zooms from 1×; a retake keeps the level
+    // the previous photo was taken at, since that is usually still the right one.
+    resetZoom();
     return startCamera({ waitScreen: true });
   }
 
@@ -223,7 +250,11 @@
     els.retry.hidden = true;
     els.reviewActions.hidden = true;
     els.upload.hidden = true;
+    els.crop.hidden = true;
+    els.zoomControl.hidden = true;
     els.pickFile.hidden = false;
+    resetZoom();
+    closeCrop();
     showPlaceholder("Choose an invoice photo from this device.");
   }
 
@@ -327,7 +358,7 @@
     await waitForMetadata(els.preview);
 
     state.mirror = isFrontFacing(state.stream);
-    els.preview.classList.toggle("is-mirrored", state.mirror);
+    applyZoom();
 
     hidePlaceholder();
     els.preview.hidden = false;
@@ -339,7 +370,9 @@
     els.capture.textContent = "Take photo";
     els.retake.textContent = "Retake";
     els.upload.hidden = true;
+    els.crop.hidden = true;
     els.reviewActions.hidden = true;
+    els.zoomControl.hidden = false;
     hideProgress();
   }
 
@@ -352,6 +385,15 @@
       return;
     }
 
+    // The zoom is a digital centre crop of the live frame, so the whole image
+    // keeps its full resolution and the captured photo is exactly the part of
+    // the feed the preview showed enlarged.
+    const zoom = state.zoom;
+    const sourceWidth = width / zoom;
+    const sourceHeight = height / zoom;
+    const sourceX = (width - sourceWidth) / 2;
+    const sourceY = (height - sourceHeight) / 2;
+
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -360,7 +402,7 @@
       context.translate(width, 0);
       context.scale(-1, 1);
     }
-    context.drawImage(video, 0, 0, width, height);
+    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
 
     canvas.toBlob(
       (blob) => {
@@ -389,11 +431,14 @@
 
     els.capture.hidden = true;
     els.pickFile.hidden = true;
+    els.crop.hidden = false;
     els.reviewActions.hidden = false;
     els.upload.hidden = false;
     els.upload.disabled = false;
     els.upload.textContent = "Upload";
     els.retake.textContent = state.mode === "upload" ? "Choose another" : "Retake";
+    els.zoomControl.hidden = true;
+    closeCrop();
     setStatus(
       state.mode === "upload"
         ? "Photo selected. Upload it or choose another."
@@ -401,7 +446,288 @@
     );
   }
 
+  /* ------------------------------------------------------------- framing: zoom */
+
+  /** Bakes the current zoom and mirror into the preview's transform.
+   *
+   * The mirror is folded in here (not a CSS class) so the two can coexist: an
+   * inline transform overrides the class, so keeping them separate would lose
+   * one or the other. The captured photo bakes the same framing into its
+   * pixels, so what you saw is what is uploaded.
+   */
+  function applyZoom() {
+    const flip = state.mirror ? "scaleX(-1) " : "";
+    const scaled = state.zoom === 1 && !state.mirror ? "" : `${flip}scale(${state.zoom})`;
+    els.preview.style.transform = scaled;
+  }
+
+  /** Sets the zoom, keeping state, the slider, the readout and the preview in
+   * step. Clamped so a stray value cannot zoom the frame to nothing or beyond
+   * the cap.
+   */
+  function setZoom(zoom) {
+    state.zoom = Math.min(MAX_ZOOM, Math.max(1, zoom));
+    els.zoomSlider.value = String(state.zoom);
+    els.zoomValue.textContent = `${state.zoom.toFixed(1)}×`;
+    applyZoom();
+  }
+
+  function resetZoom() {
+    setZoom(1);
+  }
+
+  /* ---------------------------------------------------------------- cropping */
+
+  /** Opens the crop tool over the current photo.
+   *
+   * The selection is kept as a percentage of the photo, so it survives any
+   * change in how the stage is sized, and the overlay is built fresh each time
+   * so a cancelled session leaves no trace.
+   */
+  function openCrop() {
+    if (!state.photo || state.crop) return;
+    closeCrop();
+
+    const overlay = document.createElement("div");
+    overlay.className = "crop";
+
+    const image = document.createElement("img");
+    // Shares the stage__media rules so it is sized exactly like the reviewed
+    // photo underneath; it is what the selection is drawn over.
+    image.className = "stage__media crop__image";
+    image.alt = "Crop selected photo";
+    image.src = els.still.getAttribute("src");
+
+    const selection = document.createElement("div");
+    selection.className = "crop__selection";
+    for (const corner of ["nw", "ne", "sw", "se"]) {
+      const handle = document.createElement("span");
+      handle.className = "crop__handle";
+      handle.dataset.corner = corner;
+      selection.appendChild(handle);
+    }
+
+    const bar = document.createElement("div");
+    bar.className = "crop__bar";
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button button--primary";
+    apply.textContent = "Apply crop";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "button button--ghost";
+    reset.textContent = "Reset";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "button button--ghost";
+    cancel.textContent = "Cancel";
+    bar.append(apply, reset, cancel);
+
+    overlay.append(image, selection, bar);
+    els.still.parentElement.appendChild(overlay);
+
+    apply.addEventListener("click", applyCrop);
+    reset.addEventListener("click", resetCrop);
+    cancel.addEventListener("click", closeCrop);
+    window.addEventListener("keydown", onCropKeydown);
+    overlay.addEventListener("pointerdown", onCropPointerDown);
+    window.addEventListener("pointermove", onCropPointerMove);
+    window.addEventListener("pointerup", onCropPointerEnd);
+
+    state.crop = { overlay, selection };
+    state.cropRect = fullCropRect();
+    positionCropSelection();
+  }
+
+  function closeCrop() {
+    window.removeEventListener("keydown", onCropKeydown);
+    window.removeEventListener("pointermove", onCropPointerMove);
+    window.removeEventListener("pointerup", onCropPointerEnd);
+    if (state.crop) {
+      state.crop.overlay.remove();
+    }
+    state.crop = null;
+    state.cropRect = null;
+    state.cropStart = null;
+    state.cropCorner = null;
+  }
+
+  function onCropKeydown(event) {
+    if (event.key === "Escape") closeCrop();
+  }
+
+  function fullCropRect() {
+    return { left: 0, top: 0, width: 100, height: 100 };
+  }
+
+  /** Moves the visual box to match state.cropRect (both in percent). */
+  function positionCropSelection() {
+    if (!state.crop) return;
+    const rect = state.cropRect;
+    const selection = state.crop.selection;
+    selection.style.left = `${rect.left}%`;
+    selection.style.top = `${rect.top}%`;
+    selection.style.width = `${rect.width}%`;
+    selection.style.height = `${rect.height}%`;
+  }
+
+  /** Clamps a crop rect: the selection stays inside the photo and at least
+   * MIN_CROP_PERCENT on each side, so it can always be resized back up.
+   */
+  function clampCropRect(rect) {
+    const width = Math.min(100, Math.max(MIN_CROP_PERCENT, rect.width));
+    const height = Math.min(100, Math.max(MIN_CROP_PERCENT, rect.height));
+    const left = Math.min(100 - width, Math.max(0, rect.left));
+    const top = Math.min(100 - height, Math.max(0, rect.top));
+    return { left, top, width, height };
+  }
+
+  function setCropRect(rect) {
+    state.cropRect = clampCropRect(rect);
+    positionCropSelection();
+  }
+
+  /** How many crop-percent steps one screen pixel represents, taken from the
+   * rendered image so the selection tracks the pointer 1:1. When nothing is
+   * laid out yet the photo's intrinsic size stands in.
+   */
+  function cropPercentPerPixel() {
+    const rect = els.still.getBoundingClientRect();
+    if (rect.width > 0) return 100 / rect.width;
+    return 100 / (els.still.naturalWidth || 1);
+  }
+
+  function onCropPointerDown(event) {
+    const handle = event.target.closest
+      ? event.target.closest(".crop__handle")
+      : null;
+    const onBox = event.target.classList?.contains("crop__selection");
+    if (!handle && !onBox) return;
+    state.cropCorner = handle ? handle.dataset.corner : null;
+    state.cropStart = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      ...state.cropRect,
+    };
+    event.preventDefault();
+  }
+
+  function onCropPointerMove(event) {
+    if (!state.cropStart || !state.cropRect) return;
+    const perPixel = cropPercentPerPixel();
+    const dx = (event.clientX - state.cropStart.pointerX) * perPixel;
+    const dy = (event.clientY - state.cropStart.pointerY) * perPixel;
+    const start = state.cropStart;
+    const corner = state.cropCorner;
+
+    if (!corner) {
+      setCropRect({
+        left: start.left + dx,
+        top: start.top + dy,
+        width: start.width,
+        height: start.height,
+      });
+      return;
+    }
+    // The corners opposite the dragged one are anchored; only the two edges
+    // sharing the dragged corner move.
+    if (corner === "se") {
+      setCropRect({ left: start.left, top: start.top, width: start.width + dx, height: start.height + dy });
+    } else if (corner === "sw") {
+      setCropRect({ left: start.left + dx, top: start.top, width: start.width - dx, height: start.height + dy });
+    } else if (corner === "ne") {
+      setCropRect({ left: start.left, top: start.top + dy, width: start.width + dx, height: start.height - dy });
+    } else {
+      setCropRect({ left: start.left + dx, top: start.top + dy, width: start.width - dx, height: start.height - dy });
+    }
+  }
+
+  function onCropPointerEnd() {
+    state.cropStart = null;
+    state.cropCorner = null;
+  }
+
+  function resetCrop() {
+    if (!state.crop) return;
+    state.cropRect = fullCropRect();
+    positionCropSelection();
+  }
+
+  /** The photo's size in pixels, for turning the percentage selection into a
+   * real crop. A photo that has not decoded yet falls back to its rendered box,
+   * which is at least something to keep the aspect from collapsing.
+   */
+  function imagePixelExtent() {
+    const width = els.still.naturalWidth || els.still.getBoundingClientRect().width || 1;
+    const height = els.still.naturalHeight || els.still.getBoundingClientRect().height || 1;
+    return { width, height };
+  }
+
+  /** Cuts the selected region out of the photo and makes it the new photo. */
+  function applyCrop() {
+    if (!state.photo || !state.crop || !state.cropRect) return;
+    const rect = state.cropRect;
+    const image = imagePixelExtent();
+    const width = Math.max(1, Math.round((rect.width / 100) * image.width));
+    const height = Math.max(1, Math.round((rect.height / 100) * image.height));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setStatus("Cropping is not supported here.", "error");
+      return;
+    }
+    context.drawImage(
+      els.still,
+      Math.round((rect.left / 100) * image.width),
+      Math.round((rect.top / 100) * image.height),
+      width,
+      height,
+      0,
+      0,
+      width,
+      height
+    );
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setStatus("Could not crop the photo.", "error");
+          return;
+        }
+        // An uploaded photo keeps its name through the crop; a captured blob
+        // has none and needs no name.
+        let cropped = blob;
+        if (state.photo.name) {
+          cropped = new File([blob], state.photo.name, {
+            type: blob.type || state.photo.type,
+          });
+        }
+        showCropped(cropped);
+      },
+      "image/jpeg",
+      0.92
+    );
+  }
+
+  /** Replaces the reviewed photo with a cropped one, then closes the tool. */
+  function showCropped(photo) {
+    state.photo = photo;
+    releasePhotoUrl();
+    state.photoUrl = URL.createObjectURL(photo);
+    els.still.src = encodeURI(state.photoUrl);
+    setStatus(
+      state.mode === "upload"
+        ? "Photo cropped. Upload it or choose another."
+        : "Photo cropped. Retake it or upload."
+    );
+    closeCrop();
+  }
+
   function retake() {
+    closeCrop();
     if (state.mode === "upload") {
       setStatus("");
       return openFilePicker();
@@ -476,6 +802,7 @@
       }
 
       els.upload.hidden = true;
+      els.crop.hidden = true;
       // The verdict panel owns going again once a result is on screen, so the
       // review bar's "Choose another photo" is withdrawn here rather than left
       // to compete with it. It comes back if the analysis fails, since that is
@@ -1062,6 +1389,8 @@
     els.still.removeAttribute("src");
     releasePhotoUrl();
     state.photo = null;
+    els.crop.hidden = true;
+    closeCrop();
   }
 
   function showPlaceholder(text, { spinner = false } = {}) {
@@ -1079,6 +1408,7 @@
     els.preview.hidden = true;
     els.still.hidden = true;
     els.capture.disabled = true;
+    els.zoomControl.hidden = true;
     showPlaceholder(message);
     els.retry.hidden = false;
   }

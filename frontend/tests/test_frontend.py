@@ -837,3 +837,144 @@ def test_the_verdict_buttons_do_not_collide_with_the_results_controls():
     ids = re.findall(r'id="([^"]+)"', HTML)
     duplicates = {element_id for element_id in ids if ids.count(element_id) > 1}
     assert not duplicates, f"duplicate element ids: {sorted(duplicates)}"
+
+
+# -------------------------------------------------------- framing: zoom & crop
+
+
+def test_the_zoom_control_is_offered_only_for_a_live_camera():
+    """The zoom slider belongs to the live preview, not the still photo."""
+    zoom = re.search(r'<div id="zoomControl"[^>]*>', HTML)
+    assert zoom, "#zoomControl is missing"
+    assert "hidden" in zoom.group(0), (
+        "the zoom control must start hidden and be revealed by startCamera()"
+    )
+    slider = re.search(r'<input[^>]*id="zoomSlider"[^>]*>', HTML)
+    assert slider, "#zoomSlider is missing"
+    assert 'type="range"' in slider.group(0)
+    for attribute in ('min="1"', 'max="3"', 'step="0.1"', 'value="1"'):
+        assert attribute in slider.group(0), f"slider must carry {attribute}"
+    assert 'id="zoomValue"' in HTML, "the zoom readout is missing"
+    start = re.search(r"async function startCamera\([^)]*\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert "els.zoomControl.hidden = false" in start.group(0), (
+        "startCamera() must reveal the zoom control"
+    )
+    assert "applyZoom()" in start.group(0), "startCamera() must apply the zoom"
+    show = re.search(r"function showPhoto\(.*?\n  \}", APP_JS, re.S)
+    assert "els.zoomControl.hidden = true" in show.group(0), (
+        "the zoom control must go once a photo is taken"
+    )
+    assert "els.crop.hidden = false" in show.group(0), (
+        "the crop action must be offered once there is a photo"
+    )
+    assert "els.crop.hidden = true" in re.search(
+        r"function enterUploadMode\(\)\s*\{.*?\n  \}", APP_JS, re.S
+    ).group(0), "upload mode must not offer the crop tool"
+    fail = re.search(r"function failCamera\(.*?\n  \}", APP_JS, re.S)
+    assert "els.zoomControl.hidden = true" in fail.group(0), (
+        "the zoom control must not linger when the camera fails"
+    )
+
+
+def test_the_zoom_is_a_digital_centre_crop_of_the_feed():
+    """The whole sensor resolution is spent on the invoice, so no photo is
+    taken of a boardroom from three metres away."""
+    capture = re.search(r"function capturePhoto\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert capture, "capturePhoto not found"
+    body = capture.group(0)
+    assert "const sourceWidth = width / zoom;" in body, (
+        "the crop width must shrink with the zoom"
+    )
+    assert "const sourceHeight = height / zoom;" in body
+    assert "const sourceX = (width - sourceWidth) / 2;" in body, (
+        "the crop must stay centred"
+    )
+    assert "const sourceY = (height - sourceHeight) / 2;" in body
+    assert "MAX_ZOOM" in APP_JS and "MIN_CROP_PERCENT" in APP_JS, (
+        "zoom and crop need their bounds"
+    )
+    assert re.search(r"const MAX_ZOOM\s*=\s*3;", APP_JS)
+    zoom = re.search(r"function applyZoom\(\)\s*\{.*?\n  \}", APP_JS, re.S).group(0)
+    assert "els.preview.style.transform =" in zoom, (
+        "the zoom must be a preview transform, not a native camera setting"
+    )
+    set_zoom = re.search(r"function setZoom\(zoom\)\s*\{.*?\n  \}", APP_JS, re.S).group(0)
+    assert "Math.min(MAX_ZOOM, Math.max(1, zoom))" in set_zoom, (
+        "the zoom must be clamped so it can never overshoot"
+    )
+    assert 'els.zoomValue.textContent = `${state.zoom.toFixed(1)}×`;' in set_zoom, (
+        "the readout must follow the slider"
+    )
+    choose = re.search(r"function chooseMode\(mode\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert "resetZoom()" in choose.group(0), (
+        "a fresh camera start must zoom from 1×"
+    )
+    assert "resetZoom()" in re.search(
+        r"function resetZoom\(\)\s*\{.*?\n  \}", APP_JS, re.S
+    ).group(0), "resetZoom() must reset to 1×"
+
+
+def test_the_crop_tool_cuts_the_selected_region_out():
+    """The selection is a percentage of the photo, and applying it reads only
+    that region, so the cropped photo is the whole new image."""
+    open_crop = re.search(r"function openCrop\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert open_crop, "openCrop not found"
+    body = open_crop.group(0)
+    assert 'overlay.className = "crop";' in body, "the overlay needs its class"
+    assert 'selection.className = "crop__selection";' in body
+    for corner in ("nw", "ne", "sw", "se"):
+        assert f'"{corner}"' in body, f"missing {corner} corner handle"
+    assert body.index("Apply crop") < body.index("Reset") < body.index("Cancel"), (
+        "Apply, Reset and Cancel must all be offered"
+    )
+    clamp = re.search(r"function clampCropRect\(.*?\n  \}", APP_JS, re.S)
+    assert "MIN_CROP_PERCENT" in clamp.group(0), (
+        "the selection must be clamped so it cannot collapse"
+    )
+    assert re.search(r"const MIN_CROP_PERCENT\s*=\s*10;", APP_JS), (
+        "the crop must keep at least 10% of the photo per side"
+    )
+    apply = re.search(r"function applyCrop\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert apply, "applyCrop not found"
+    apply_body = apply.group(0)
+    assert 'Math.round((rect.width / 100) * image.width)' in apply_body, (
+        "the crop must turn the percentage selection into pixels"
+    )
+    assert "context.drawImage(" in apply_body, (
+        "the cropped photo must re-read the still, not pretend"
+    )
+    assert 'new File([blob], state.photo.name' in apply_body, (
+        "an uploaded photo must keep its name through a crop"
+    )
+    assert "showCropped(cropped)" in apply_body
+    cropped = re.search(r"function showCropped\(.*?\n  \}", APP_JS, re.S)
+    assert "closeCrop()" in cropped.group(0), "the tool must close once applied"
+    keydown = re.search(r"function onCropKeydown\(.*?\n  \}", APP_JS, re.S)
+    assert 'event.key === "Escape"' in keydown.group(0) and "closeCrop()" in keydown.group(0), (
+        "Escape must cancel the crop"
+    )
+    close = re.search(r"function closeCrop\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert "overlay.remove()" in close.group(0), "a closed crop must leave no trace"
+    clear = re.search(r"function clearPhoto\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert "els.crop.hidden = true" in clear.group(0) and "closeCrop()" in clear.group(0), (
+        "clearing a photo must take the crop tool with it"
+    )
+
+
+def test_the_crop_button_starts_hidden_in_the_markup():
+    """The crop action belongs to the review bar and has no photo to work on
+    until one is captured."""
+    button = re.search(r'<button[^>]*id="crop"[^>]*>', HTML)
+    assert button, "the crop button is missing"
+    assert "hidden" in button.group(0), (
+        "the crop button must start hidden until a photo is shown"
+    )
+    assert "button--secondary" in button.group(0), (
+        "the crop action must be secondary to Upload"
+    )
+    assert re.search(r'id="reviewActions"[^>]*>\s*<button[^>]*id="retake"', HTML), (
+        "the review actions group is missing its retake button"
+    )
+    assert "id=\"crop\"" in re.search(
+        r'<div class="controls__group"[^>]*id="reviewActions".*?</div>', HTML, re.S
+    ).group(0), "the crop button must live inside the review actions group"

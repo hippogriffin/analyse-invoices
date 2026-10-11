@@ -127,9 +127,8 @@ body {
   width: 100%;
 }
 
-.stage__media.is-mirrored {
-  transform: scaleX(-1);
-}
+/* The preview's mirror and zoom are applied as an inline transform by the
+   app (applyZoom), since both must combine into one value. */
 
 .stage__placeholder {
   align-items: center;
@@ -179,7 +178,103 @@ body {
 .controls__group {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.zoom {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.zoom__label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 46px;
+}
+
+.zoom__slider {
+  accent-color: var(--accent);
+  flex: 1;
+  min-width: 0;
+}
+
+.zoom__value {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 38px;
+  text-align: right;
+}
+
+/*
+ * The crop overlay sits over the stage while acting on a photo. The selection
+ * box dims everything outside itself, and its four corner handles resize it;
+ * dragging the box moves it.
+ */
+.crop {
+  inset: 0;
+  position: absolute;
+  touch-action: none;
+  z-index: 10;
+}
+
+.crop__selection {
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgb(2 6 23 / 0.55);
+  cursor: move;
+  position: absolute;
+  touch-action: none;
+}
+
+.crop__handle {
+  background: var(--accent-strong);
+  border: 2px solid var(--bg);
+  border-radius: 4px;
+  height: 20px;
+  position: absolute;
+  width: 20px;
+}
+
+.crop__handle[data-corner="nw"] {
+  cursor: nwse-resize;
+  left: -10px;
+  top: -10px;
+}
+
+.crop__handle[data-corner="ne"] {
+  cursor: nesw-resize;
+  right: -10px;
+  top: -10px;
+}
+
+.crop__handle[data-corner="sw"] {
+  bottom: -10px;
+  cursor: nesw-resize;
+  left: -10px;
+}
+
+.crop__handle[data-corner="se"] {
+  bottom: -10px;
+  cursor: nwse-resize;
+  right: -10px;
+}
+
+.crop__bar {
+  align-items: center;
+  bottom: 10px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.crop__bar .button {
+  min-height: 40px;
+  width: auto;
 }
 
 .button {
