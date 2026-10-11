@@ -149,6 +149,7 @@
   };
 
   init();
+  registerServiceWorker();
 
   async function init() {
     els.chooseCamera.addEventListener("click", () => chooseMode("camera"));
@@ -1492,6 +1493,26 @@
     if (video.readyState >= 1 && video.videoWidth > 0) return Promise.resolve();
     return new Promise((resolve) => {
       video.addEventListener("loadedmetadata", () => resolve(), { once: true });
+    });
+  }
+
+  /** Registers the service worker that caches the shell, so the app can be
+   * installed and opened offline. Entirely optional: the page works without it,
+   * and on an insecure origin (where service workers are unavailable) it simply
+   * does nothing. Registration waits for `load` so it never competes with the
+   * first paint or the camera prompt.
+   */
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    window.addEventListener("load", () => {
+      try {
+        // The worker lives at the root so it can control the whole app.
+        navigator.serviceWorker.register("/sw.js").catch(() => {
+          // Offline support is a bonus; the app works without it.
+        });
+      } catch {
+        // An insecure context, or a browser that refuses registration.
+      }
     });
   }
 })();

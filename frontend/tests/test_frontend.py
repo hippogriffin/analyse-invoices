@@ -8,6 +8,7 @@ start hidden in the markup.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -15,6 +16,9 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 STYLES = (STATIC_DIR / "styles.css").read_text()
 HTML = (STATIC_DIR / "index.html").read_text()
 APP_JS = (STATIC_DIR / "app.js").read_text()
+MANIFEST = json.loads((STATIC_DIR / "manifest.json").read_text())
+SERVICE_WORKER = (STATIC_DIR / "sw.js").read_text()
+MAIN_PY = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
 
 CSS_RULES = re.compile(r"([^{}]+)\{([^{}]*)\}", re.S)
 HIDDEN_OVERRIDE = re.compile(r"\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important", re.S)
@@ -1040,3 +1044,79 @@ def test_the_stage_returns_to_its_default_frame_when_empty():
         assert "resetStage()" in body.group(0), (
             f"{fn}() must reset the stage to its default frame"
         )
+
+
+# ---------------------------------------------------------------- installable
+
+
+def test_the_page_declares_an_installable_manifest():
+    """Chrome on Android treats the Web App Manifest as the install contract: a
+    name, a standalone display, the theme colours and 192/512px icons (one of
+    them maskable for the adaptive shape)."""
+    link = re.search(r'<link[^>]*rel="manifest"[^>]*>', HTML)
+    assert link, "index.html must link the web app manifest"
+    assert "/static/manifest.json" in link.group(0)
+
+    assert MANIFEST.get("name") and MANIFEST.get("short_name"), (
+        "the manifest needs both a name and a short name"
+    )
+    assert MANIFEST.get("start_url") == "/", "an installed app starts at the root"
+    assert MANIFEST.get("display") == "standalone", (
+        "display: standalone is what opens the installed app without browser chrome"
+    )
+    assert MANIFEST.get("theme_color") and MANIFEST.get("background_color")
+
+    sizes = {icon.get("sizes") for icon in MANIFEST["icons"]}
+    assert {"192x192", "512x512"} <= sizes, "the manifest needs 192px and 512px icons"
+    assert "maskable" in {icon.get("purpose") for icon in MANIFEST["icons"]}, (
+        "Android's adaptive icon needs a maskable icon"
+    )
+
+
+def test_every_manifest_icon_is_a_file_that_is_shipped():
+    """An icon that 404s quietly removes the install prompt, so each src must
+    resolve to a committed file inside the static directory."""
+    for icon in MANIFEST["icons"]:
+        src = icon["src"]
+        assert src.startswith("/static/"), f"{src} is outside the static mount"
+        assert (STATIC_DIR / src.removeprefix("/static/")).is_file(), (
+            f"manifest icon {src} is missing"
+        )
+
+
+def test_ios_gets_the_tags_it_uses_instead_of_the_manifest():
+    """Safari on iOS ignores the manifest's icons and standalone flag: it wants
+    an apple-touch-icon and the apple-mobile-web-app-capable meta instead."""
+    touch = re.search(r'<link[^>]*rel="apple-touch-icon"[^>]*>', HTML)
+    assert touch, "iOS needs an apple-touch-icon link"
+    assert "apple-touch-icon.png" in touch.group(0)
+    assert (STATIC_DIR / "icons" / "apple-touch-icon.png").is_file(), (
+        "the apple-touch-icon must exist"
+    )
+    assert re.search(
+        r'<meta[^>]*name="apple-mobile-web-app-capable"[^>]*content="yes"', HTML
+    ), "iOS needs apple-mobile-web-app-capable=yes to launch standalone"
+
+
+def test_a_root_service_worker_caches_the_shell():
+    """A service worker may only control URLs at or below its own directory, so
+    the one that precaches the page must be served from the root and registered
+    as /sw.js — not from under /static."""
+    assert re.search(r'@app\.get\("/sw\.js"', MAIN_PY), (
+        "the service worker must be served from /sw.js so its scope is the app"
+    )
+    assert re.search(r'register\("/sw\.js"\)', APP_JS), "app.js must register /sw.js"
+    assert '"/"' in SERVICE_WORKER and '"/static/app.js"' in SERVICE_WORKER, (
+        "the shell (the page and its assets) must be precached for offline"
+    )
+
+
+def test_the_service_worker_never_caches_the_api():
+    """A photo's upload and its result must always be live: a cached /api/ reply
+    would show a stale invoice, or a result that was never actually polled."""
+    assert 'startsWith("/api/")' in SERVICE_WORKER, (
+        "the service worker must leave /api/ requests to the network"
+    )
+    assert 'request.method !== "GET"' in SERVICE_WORKER, (
+        "the service worker must only handle GETs; uploads are POSTs"
+    )

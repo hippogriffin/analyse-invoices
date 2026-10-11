@@ -33,6 +33,18 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker() -> FileResponse:
+    """Served from the root so its scope is the whole app, not /static.
+
+    A service worker may only control URLs at or below its own directory, so the
+    one that precaches the page has to live at the top level. A `.js` response
+    type is set explicitly; the file is outside the /static mount.
+    """
+    return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript")
+
+
+
 @app.get("/healthz", include_in_schema=False)
 async def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok"})

@@ -22,7 +22,7 @@ chosen photo over the network, so it holds no credentials of any kind.
 
 | Directory | What it is | Runs as |
 | --- | --- | --- |
-| [`frontend/`](frontend/README.md) | Camera UI and file chooser. Serves the page, forwards API calls to the backend, and holds no Azure credentials | Docker container |
+| [`frontend/`](frontend/README.md) | Camera UI and file chooser, installable as an app (PWA). Serves the page, forwards API calls to the backend, and holds no Azure credentials | Docker container |
 | [`backend/`](backend/README.md) | Stores the photo, analyses it, and keeps the extracted invoice fields | Docker container |
 | `logic-app.json` | The Azure Logic App this replaces. Kept for reference. | Azure resource — **not** a container |
 
@@ -33,7 +33,8 @@ chosen photo over the network, so it holds no credentials of any kind.
    preview is live a **Zoom** slider (1×–3×) enlarges the frame — a digital
    centre crop, so the captured photo keeps the full resolution of just that
    part — and a captured or chosen photo can be trimmed with **Crop** before it
-   is sent.
+   is sent. The page is installable to a phone's home screen (a web app
+   manifest, icons and a service worker) and opens offline.
 2. The browser posts the file to `frontend/`, which forwards it to `backend/`.
    The backend returns an invoice id immediately and continues in a background
    task.
@@ -138,7 +139,7 @@ default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 .
 ├── frontend/                 # camera capture UI (containerised)
 │   ├── app/                  # FastAPI app and config, no Azure
-│   ├── static/               # camera UI and results panel (no build step)
+│   ├── static/               # camera UI, manifest, icons and service worker (no build step)
 │   ├── tests/                # pytest suite
 │   ├── scripts/              # DOM checks
 │   ├── Dockerfile
@@ -155,9 +156,9 @@ default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 ## Testing
 
 ```bash
-(cd frontend && ../backend/.venv/bin/python -m pytest)  # 58 checks
+(cd frontend && ../backend/.venv/bin/python -m pytest)  # 86 checks
 (cd backend  && .venv/bin/python -m pytest)  # 219 checks
-node frontend/scripts/check_ui.js            # 142 DOM checks, needs: npm install jsdom
+node frontend/scripts/check_ui.js            # 199 DOM checks, needs: npm install jsdom
 ```
 
 No suite contacts Azure, and none depends on a local `.env`.
