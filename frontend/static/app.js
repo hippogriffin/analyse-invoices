@@ -1176,6 +1176,12 @@
    * is still on its way.
    */
   function renderAllowance(monthlyAllowance, documentsRemaining) {
+    // The line only exists in the current page shell. A cached older shell has
+    // no place to put it, and this runs from hideResults(), which the upload
+    // route calls before it reveals the file picker: dereferencing a missing
+    // element would throw and leave the reviewer with no way to choose a photo.
+    // An absent element just means nothing to show.
+    if (!els.resultsAllowance) return;
     const known =
       typeof monthlyAllowance === "number" &&
       typeof documentsRemaining === "number";

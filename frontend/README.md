@@ -104,8 +104,9 @@ analysis runs, field labels and confidence badges, the remaining-monthly-allowan
 line, editing and adding values
 with their validation (money and merchant sanitising, malformed additions being
 refused), the failure state, the keep-or-discard question in each of its states,
-stale polling being cancelled by a retake, and submission being refused when no
-backend is configured. The script prints `SKIP` if jsdom
+stale polling being cancelled by a retake, submission being refused when no
+backend is configured, and that a cached page shell predating the allowance line
+still reaches the file picker. The script prints `SKIP` if jsdom
 is not installed, so it is safe to call in a pipeline.
 
 ### Testing the camera on a desktop

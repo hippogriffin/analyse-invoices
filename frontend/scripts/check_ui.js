@@ -187,10 +187,23 @@ function buildDom({
   xhrResponse = {},
   photoDecision = null,
   lostJob = false,
+  htmlOverride = null,
 } = {}) {
-  const dom = new JSDOM(html, { runScripts: "outside-only", url: "https://localhost/" });
+  const dom = new JSDOM(htmlOverride || html, {
+    runScripts: "outside-only",
+    url: "https://localhost/",
+  });
   const win = dom.window;
   const doc = win.document;
+
+  // Any uncaught error or rejected promise during the run is a failure even if
+  // the visible flags happen to come out right: a thrown helper can silently
+  // strand a flow half-way.
+  win.__errors = [];
+  win.addEventListener("error", (e) => win.__errors.push(String(e.error || e.message)));
+  win.addEventListener("unhandledrejection", (e) =>
+    win.__errors.push("rejection: " + (e.reason && e.reason.message ? e.reason.message : e.reason))
+  );
 
   // A fake camera. The request count matters: nothing may ask for the camera
   // before the user picks "Take a photo".
@@ -395,6 +408,31 @@ async function captureAndUpload(win) {
     "accept list came from the server config",
     win.document.getElementById("fileInput").accept === "image/jpeg,image/png,image/webp",
     win.document.getElementById("fileInput").accept
+  );
+
+  console.log("\n--- 1b1. a stale shell without the allowance line still uploads ---");
+  // A cached older page predates the allowance line. The newer app.js must not
+  // let the missing element stop the upload route from revealing the picker.
+  const staleShell = html.replace(/[^\S\n]*<p[^>]*id="resultsAllowance"[^>]*><\/p>\n/, "");
+  check(
+    "the stale shell really lacks the allowance line",
+    !/id="resultsAllowance"/.test(staleShell)
+  );
+  win = buildDom({ htmlOverride: staleShell });
+  await tick();
+  await chooseMode(win, "upload");
+  s = snapshot(win, "after choosing upload on a stale shell");
+  check("chooser gone on a stale shell", s.modePicker === false);
+  check("workbench shown on a stale shell", s.workbench === true);
+  check(
+    "choose-a-photo still offered on a stale shell",
+    s.pickFile === true,
+    "the picker button must still appear"
+  );
+  check(
+    "no uncaught error from the missing allowance line",
+    win.__errors.length === 0,
+    win.__errors.join(" | ")
   );
 
   console.log("\n--- 1b2. with no backend, the chooser still works ---");
