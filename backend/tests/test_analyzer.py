@@ -196,11 +196,11 @@ class TestToDocuments:
         assert _to_documents(result)[0].fields == []
 
     def test_a_dropped_field_never_makes_it_out_of_extraction(self) -> None:
-        """PreviousUnpaidBalance is not kept anywhere, not even for a reviewer.
+        """Dropped fields are not kept anywhere, not even for a reviewer.
 
-        Some invoices carry a previous balance the reviewer is not trusted to
-        confirm, so it is filtered at the source: no screen, stored row or
-        response can ever contain it.
+        Some invoice values there is nothing trustworthy left to do with — a
+        previous balance, or the amount due — so they are filtered at the
+        source: no screen, stored row or response can ever contain them.
         """
         result = Result(
             documents=[
@@ -208,6 +208,7 @@ class TestToDocuments:
                     fields={
                         "VendorName": Field(value_string="Acme"),
                         "PreviousUnpaidBalance": Field(value_string="50.00 EUR"),
+                        "InvoiceTotal": Field(value_string="120.00 EUR"),
                         "AmountDue": Field(value_string="120.00 EUR"),
                     }
                 )
@@ -215,7 +216,7 @@ class TestToDocuments:
         )
         documents = _to_documents(result)
         assert [item.name for item in documents[0].fields] == [
-            "AmountDue",
+            "InvoiceTotal",
             "VendorName",
         ]
 

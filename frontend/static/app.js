@@ -82,7 +82,9 @@
     InvoiceTotal: { label: "Invoice total", type: "money" },
     AmountDue: { label: "Amount due", type: "money" },
     SubTotal: { label: "Subtotal", type: "money" },
-    TotalTax: { label: "Total tax", type: "money" },
+    // The total tax is required like the merchant: the document cannot be
+    // stored without it, so an empty warning row asks for it too.
+    TotalTax: { label: "Total tax", type: "money", required: true },
   };
 
   // Rendering order: merchants are what people look for first.

@@ -61,10 +61,10 @@ const COMPLETE_STATUS = {
         DueDate: { value: "2026-03-01", confidence: 0.4 },
         AmountDue: { value: "120.00", confidence: 0.6 },
         SubTotal: { value: "100.00 EUR", confidence: null },
-        // TotalTax is deliberately absent: only what the model returned is on
-        // screen, since the add-a-field control is gone. PreviousUnpaidBalance
-        // is not kept anywhere by this deployment, so the review screen must
-        // not show it either.
+        TotalTax: { value: "10.00 EUR", confidence: 0.9 },
+        // The add-a-field control is gone, so what the model returned is exactly
+        // what is on screen. PreviousUnpaidBalance is not kept anywhere by this
+        // deployment, so the review screen must not show it either.
         PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
         EmptyField: { value: "", confidence: 0.9 },
       },
@@ -83,6 +83,26 @@ const NO_MERCHANT_STATUS = {
       index: 0,
       confidence: 0.95,
       fields: {
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        DueDate: { value: "2026-03-01", confidence: 0.7 },
+        TotalTax: { value: "10.00 EUR", confidence: 0.9 },
+      },
+    },
+  ],
+};
+
+// A document the model read no total tax from. Like a missing merchant, the
+// total tax row must still be on screen, empty, warning, and impossible to
+// accept without a value.
+const NO_TOTAX_STATUS = {
+  status: "complete",
+  documentCount: 1,
+  documents: [
+    {
+      index: 0,
+      confidence: 0.95,
+      fields: {
+        VendorName: { value: "Acme Ltd", confidence: 0.99 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.7 },
       },
@@ -612,7 +632,8 @@ async function captureAndUpload(win) {
   check("VendorName shown as Merchant", names.includes("Merchant"), names.join(" | "));
   check(
     "only the reviewed fields are on the screen",
-    names.join(" | ") === "Merchant | Due date | Invoice total | Amount due | Subtotal",
+    names.join(" | ") ===
+      "Merchant | Due date | Invoice total | Amount due | Subtotal | Total tax",
     names.join(" | ")
   );
   check(
@@ -622,7 +643,7 @@ async function captureAndUpload(win) {
   );
   check(
     "empty non-required values are omitted",
-    names.length === 5,
+    names.length === 6,
     names.join(" | ")
   );
   check(
@@ -646,12 +667,14 @@ async function captureAndUpload(win) {
   );
   check(
     "every value is an editable input",
-    values.length === 5,
+    values.length === 6,
     `${values.length} input(s)`
   );
   check(
     "money is shown without its currency suffix",
-    values.some((input) => input.value === "120.00"),
+    values.filter((input) => /^\d+\.\d{2}$/.test(input.value)).length === 4 &&
+      values.some((input) => input.value === "120.00") &&
+      values.some((input) => input.value === "10.00"),
     values.map((input) => input.value).join(" | ")
   );
   check(
@@ -1346,6 +1369,86 @@ async function captureAndUpload(win) {
     "and the untouched values still stay off the wire",
     !merchantFields.InvoiceTotal && !merchantFields.DueDate,
     JSON.stringify(merchantFields)
+  );
+
+  console.log("\n--- 20c. a missing total tax is required, like the merchant ---");
+  // TotalTax is the merchant's partner in requiredness: a document the model
+  // read none from shows the row empty and warning, and the document cannot be
+  // stored until a valid amount is typed.
+  win = buildDom({
+    analysisApiBaseUrl: "https://analysis.example",
+    statuses: [{ ...NO_TOTAX_STATUS, photoSatisfied: null }],
+  });
+  await tick();
+  await captureAndUpload(win);
+  await wait(1200);
+
+  const taxRow = [...win.document.querySelectorAll(".fields__row")]
+    .find((row) => row.dataset.field === "TotalTax");
+  const taxBox = taxRow && taxRow.querySelector(".fields__input");
+  const taxError = taxRow && taxRow.querySelector(".fields__error");
+  check(
+    "a missing total tax is shown as an empty editable row",
+    !!taxBox && taxBox.value === "",
+    valuesOnScreen(win)
+  );
+  check(
+    "labelled Total tax, ready to type into",
+    !!taxRow &&
+      taxRow.querySelector(".fields__name").textContent === "Total tax",
+    valuesOnScreen(win)
+  );
+  check(
+    "with a red warning that it is required",
+    !!taxError && !taxError.hidden &&
+      /required/i.test(taxError.textContent),
+    taxError ? taxError.textContent : "no error row"
+  );
+  const blockedTax = win.__fetchStub.decisions.length;
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "accepting without a total tax is refused",
+    win.__fetchStub.decisions.length === blockedTax &&
+      /total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  taxBox.value = "12.5"; // needs two decimals
+  taxBox.dispatchEvent(new win.Event("input"));
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  check(
+    "a total tax without two decimals is still refused",
+    win.__fetchStub.decisions.length === blockedTax &&
+      /total tax/i.test(win.document.getElementById("status").textContent),
+    win.document.getElementById("status").textContent
+  );
+  taxBox.value = "12.50";
+  taxBox.dispatchEvent(new win.Event("input"));
+  check(
+    "a valid amount withdraws the warning",
+    !taxError.hidden === false,
+    taxError.textContent
+  );
+  win.document.getElementById("photoOkay").click();
+  await wait(300);
+  const taxDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
+  let taxPayload = {};
+  try {
+    const payload = JSON.parse(taxDecision.body);
+    taxPayload = ((payload.documents || [])[0] || {}).fields || {};
+  } catch {
+    // Reported by the check below.
+  }
+  check(
+    "with a total tax typed it is stored",
+    taxPayload.TotalTax && taxPayload.TotalTax.value === "12.50",
+    JSON.stringify(taxPayload)
+  );
+  check(
+    "and the untouched merchant stays off the wire",
+    !taxPayload.VendorName,
+    JSON.stringify(taxPayload)
   );
 
   console.log("\n--- 21. the same editing and validation works for an uploaded photo ---");

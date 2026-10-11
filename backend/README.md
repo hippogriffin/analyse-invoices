@@ -144,11 +144,12 @@ particular `PreviousUnpaidBalance` is not kept by this service at all: it is
 dropped from the extraction, so it is never stored, never returned, and a
 correction naming it is ignored rather than reintroducing it.
 
-The merchant is **required**: a document with no merchant (whether the model did
-not read one, or a correction cleared it) is refused with `422` and nothing is
-stored. The reviewer is asked for a merchant until one is read or typed, so a
-row in the table always has one; this is the backstop behind the UI, which shows
-the empty merchant row and blocks the accept button for the same reason.
+The merchant and the total tax are **required**: a document missing either
+(whether the model did not read it, or a correction cleared it) is refused with
+`422` and nothing is stored. The reviewer is asked for a merchant and a total
+tax until both are read or typed, so a row in the table always has them; this
+is the backstop behind the UI, which shows the empty required rows and blocks
+the accept button for the same reason.
 
 Saying no therefore takes the result away rather than recording an opinion about
 it. It deletes every row for the partition and returns `204` with no body, so the

@@ -433,6 +433,26 @@ def test_the_merchant_is_required():
     )
 
 
+def test_the_total_tax_is_required():
+    """A document with no total tax is not stored, like one with no merchant.
+
+    The total tax is part of what the reviewer confirms, so the UI marks it
+    required too: the row is rendered empty and warning when the model did not
+    return it, and accepting is refused until it holds a value.
+    """
+    assert re.search(r"TotalTax\s*:\s*\{[^}]*required\s*:\s*true", APP_JS), (
+        "the total tax must be marked as the required field, like the merchant"
+    )
+    assert re.search(r"TotalTax\s*:\s*\{[^}]*type:\s*\"money\"", APP_JS), (
+        "the total tax must still be validated as an amount with two decimals"
+    )
+    render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
+    assert render, "renderDocument not found"
+    assert re.search(r"reviewable\.required\s*&&\s*!fields\.has\(", render.group(0)), (
+        "a required field must be rendered even when the model did not return it"
+    )
+
+
 def test_corrections_are_sent_only_when_the_reviewer_changed_something():
     """A plain accept is unchanged; an edited one carries the corrections.
 

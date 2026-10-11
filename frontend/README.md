@@ -168,17 +168,18 @@ is trusted to correct, and nothing else:
 | `InvoiceTotal` | Invoice total | an amount with two decimals, shown as a bare number |
 | `AmountDue` | Amount due | an amount with two decimals, shown as a bare number |
 | `SubTotal` | Subtotal | an amount with two decimals, shown as a bare number |
-| `TotalTax` | Total tax | an amount with two decimals, shown as a bare number |
+| `TotalTax` | Total tax | an amount with two decimals, shown as a bare number; required |
 
 Any other extracted field is kept out of the review screen; the previous unpaid
 balance in particular is never shown or stored by the service. Money is shown
 without its currency suffix and dates as `DD/MM/YYYY`, because that is how the
 value will need to be typed again.
 
-The merchant is **required**. A document whose merchant was not read shows the
-Merchant row empty, labelled with a red "Merchant is required." warning, ready
-to type into — and the document cannot be accepted until the field holds a
-value. The backend enforces the same rule, so nothing is stored without one.
+The merchant is **required**, and so is the **total tax**. A document whose
+merchant or total tax was not read shows that row empty, labelled with a red
+"... is required." warning, ready to type into — and the document cannot be
+accepted until both fields hold values. The backend enforces the same rule, so
+nothing is stored without them.
 
 There is no **Add a missing field** dropdown: the screen shows exactly the
 fields the model returned (plus, always, the merchant row). A field Document
