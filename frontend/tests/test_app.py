@@ -36,7 +36,7 @@ def test_index_is_served(client: TestClient):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Invoice Upload" in response.text
+    assert "Analyse Invoices" in response.text
 
 
 def test_static_assets_are_served(client: TestClient):
