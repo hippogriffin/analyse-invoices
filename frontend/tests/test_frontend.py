@@ -979,3 +979,64 @@ def test_the_crop_button_starts_hidden_in_the_markup():
     assert "id=\"crop\"" in re.search(
         r'<div class="controls__group"[^>]*id="reviewActions".*?</div>', HTML, re.S
     ).group(0), "the crop button must live inside the review actions group"
+
+
+def test_the_stage_is_fitted_to_the_media():
+    """Regression: the stage was a fixed 3:4 box, so a photo of another shape
+    was letterboxed (a narrow image with black bars on each side), and the crop
+    selection, stored in percent of the whole box, no longer matched the visible
+    image — applying a crop aligned with the photo's edges cut the vertical
+    sides. Fitting the box to the media keeps the container equal to the
+    content for both the preview and the crop."""
+    assert re.search(r"function fitStage\(width, height\)", APP_JS), (
+        "fitStage(W,H) must exist to size the stage box to the media"
+    )
+    start_camera = re.search(
+        r"async function startCamera\([^)]*\)\s*\{.*?\n  \}", APP_JS, re.S
+    )
+    assert start_camera, "startCamera() not found"
+    assert re.search(
+        r"fitStage\(els\.preview\.videoWidth, els\.preview\.videoHeight\)",
+        start_camera.group(0),
+    ), "startCamera() must fit the stage to the live feed once its sizes are known"
+
+    show_photo = re.search(r"function showPhoto\(photo\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert show_photo, "showPhoto(photo) not found"
+    assert re.search(
+        r'els\.still\.addEventListener\("load", fitStageToStill, \{ once: true \}\)',
+        show_photo.group(0),
+    ), "the stage must refit once the reviewed photo has decoded"
+
+    open_crop = re.search(r"function openCrop\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert open_crop, "openCrop() not found"
+    assert "fitStageToStill()" in open_crop.group(0), (
+        "opening the crop must refit the stage so the selection percentages "
+        "describe the visible photo, not the bars around it"
+    )
+
+
+def test_the_stage_is_centred_when_fitted_narrow():
+    """A tall photo makes the fitted stage narrower than the shell; without
+    auto margins it would hug the left edge instead of sitting centred."""
+    stage = re.search(r"\.stage\s*\{([^}]*)\}", STYLES, re.S)
+    assert stage, ".stage rule not found"
+    assert "margin-inline: auto" in stage.group(1), (
+        "a fitted stage narrower than the shell must stay centred"
+    )
+
+
+def test_the_stage_returns_to_its_default_frame_when_empty():
+    """The 3:4 shape is only a placeholder. The app fits the box to each feed
+    and photo, so whenever nothing (or just the waiting placeholder) is on
+    screen the default shape must come back rather than a stale photo shape."""
+    reset = re.search(r"function resetStage\(\)\s*\{([^}]*)\}", APP_JS, re.S)
+    assert reset, "resetStage() not found"
+    assert "aspectRatio" in reset.group(1), (
+        "resetStage() must restore the stage's default aspect ratio"
+    )
+    for fn in ("showModePicker", "enterUploadMode", "failCamera"):
+        body = re.search(rf"function {fn}\([^)]*\)\s*\{{.*?\n  \}}", APP_JS, re.S)
+        assert body, f"{fn}() not found"
+        assert "resetStage()" in body.group(0), (
+            f"{fn}() must reset the stage to its default frame"
+        )
