@@ -71,10 +71,14 @@ body {
 .stage {
   background: var(--surface);
   border-radius: var(--radius);
-  /* A fixed frame: the video, the captured photo and the placeholder are
-     stacked on top of each other, so swapping between them cannot reflow the
-     page. A fixed aspect ratio keeps the stage the same size for both. */
+  /* The default frame shape: the video, the captured photo and the placeholder
+     are stacked on top of each other, so swapping between them cannot reflow
+     the page. The app resizes the box to the feed or photo itself (fitStage), so
+     object-fit: contain never letterboxes the image; this is the shape used
+     while only the placeholder, or nothing, is on screen. */
   aspect-ratio: 3 / 4;
+  /* The fitted box may be narrower than the shell (a tall photo): centre it. */
+  margin-inline: auto;
   max-height: 70dvh;
   overflow: hidden;
   position: relative;

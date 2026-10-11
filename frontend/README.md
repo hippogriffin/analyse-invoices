@@ -46,7 +46,9 @@ the photo — drag its corners to resize, drag the box to move, then **Apply
 crop** to make the selection the new photo, **Reset** to start again, or
 **Cancel** (or `Escape`) to leave the photo untouched. The selection is kept as
 a percentage of the photo, so it survives any stage resize, and a cropped
-uploaded file keeps its filename.
+uploaded file keeps its filename. The stage sizes itself to the feed or the
+photo, so an invoice fills the frame edge to edge (no black bars around it) and
+the crop selection always lines up with the photo that is actually visible.
 
 The camera is stopped as soon as a photo is captured (privacy and battery), and
 also on `pagehide`. Front-facing cameras are mirrored in the preview, and the

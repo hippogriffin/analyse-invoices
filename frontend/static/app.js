@@ -42,6 +42,7 @@
     photoOkay: document.getElementById("photoOkay"),
     retakePhoto: document.getElementById("retakePhoto"),
     verdictStatus: document.getElementById("verdictStatus"),
+    stage: document.querySelector(".stage"),
   };
 
   const state = {
@@ -184,7 +185,8 @@
     els.preview.hidden = true;
     hideResults();
     hideProgress();
-    els.placeholder.hidden = true;
+    hidePlaceholder();
+    resetStage();
   }
 
   function chooseMode(mode) {
@@ -244,6 +246,7 @@
     hideResults();
     hideProgress();
     clearPhoto();
+    resetStage();
 
     els.capture.hidden = true;
     els.capture.disabled = true;
@@ -356,6 +359,7 @@
       // Autoplay can be blocked; the stream is still attached and visible.
     }
     await waitForMetadata(els.preview);
+    fitStage(els.preview.videoWidth, els.preview.videoHeight);
 
     state.mirror = isFrontFacing(state.stream);
     applyZoom();
@@ -424,6 +428,9 @@
     state.photoUrl = URL.createObjectURL(photo);
 
     els.still.src = encodeURI(state.photoUrl);
+    // The photo's dimensions are only known once it decodes; then the stage is
+    // fitted to it so the reviewed photo fills the frame edge to edge.
+    els.still.addEventListener("load", fitStageToStill, { once: true });
     els.still.hidden = false;
     els.preview.hidden = true;
     hidePlaceholder();
@@ -476,6 +483,38 @@
     setZoom(1);
   }
 
+  /* -------------------------------------------------------- framing: stage */
+
+  /** Sizes the stage box to the media's intrinsic shape.
+   *
+   * The stage is the box both the preview/photo and the crop overlay live in,
+   * so when the box does not match the media's aspect the image is letterboxed
+   * (the black bars either side of a narrow photo) and the selection, drawn in
+   * percent of the whole box, no longer lines up with the visible photo. Fitting
+   * the box to the media keeps the container equal to the content: no bars, and
+   * a selection percentage is the same fraction on screen and in the file.
+   */
+  function fitStage(width, height) {
+    if (!width || !height) return;
+    const ratio = width / height;
+    els.stage.style.aspectRatio = String(ratio);
+    // Bounded by the shell width and by the same 70dvh the stylesheet caps the
+    // stage at, so fitting cannot outgrow the viewport. A width bound (rather
+    // than the css max-height) is what keeps the ratio exact.
+    els.stage.style.width = `min(100%, calc(70dvh * ${ratio}))`;
+  }
+
+  /** Fits the stage to the reviewed photo, once it has actual dimensions. */
+  function fitStageToStill() {
+    fitStage(els.still.naturalWidth, els.still.naturalHeight);
+  }
+
+  /** Returns the stage to its default shape when nothing is being shown. */
+  function resetStage() {
+    els.stage.style.aspectRatio = "3 / 4";
+    els.stage.style.width = "";
+  }
+
   /* ---------------------------------------------------------------- cropping */
 
   /** Opens the crop tool over the current photo.
@@ -486,6 +525,9 @@
    */
   function openCrop() {
     if (!state.photo || state.crop) return;
+    // The selection is drawn in percent of the stage box, so the box must be
+    // the photo's own shape for the percent to describe the visible image.
+    fitStageToStill();
     closeCrop();
 
     const overlay = document.createElement("div");
@@ -724,6 +766,8 @@
         : "Photo cropped. Retake it or upload."
     );
     closeCrop();
+    // The cropped photo has its own dimensions; fit the stage once it decodes.
+    els.still.addEventListener("load", fitStageToStill, { once: true });
   }
 
   function retake() {
@@ -1411,6 +1455,7 @@
     els.zoomControl.hidden = true;
     showPlaceholder(message);
     els.retry.hidden = false;
+    resetStage();
   }
 
   function showBanner(message) {
