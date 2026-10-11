@@ -44,16 +44,18 @@ chosen photo over the network, so it holds no credentials of any kind.
 5. The browser polls `GET /api/invoices/{id}` (through the frontend proxy) and
    renders the fields, with per-field confidence so a low-confidence reading is
    visible at a glance, then asks whether the photo was good enough.
-6. **The record is created only on "Yes, it is readable"**, which is the single
+6. **The record is created only on "Upload my invoice"**, which is the single
    path that writes to Table Storage. Answering "No, retake it" deletes the
    result, answers with `204`, and the UI starts a new photo, so a reading
    somebody has rejected is never stored. Before confirming, the reviewer can
-   correct or top up a fixed set of reviewed fields — merchant, due date,
+   correct the reviewed fields the model returned — merchant, due date,
    invoice total, amount due, subtotal, total tax — validated as they are
-   entered; the corrections travel with the "Yes" and are what gets stored.
-   The merchant is required: a document with none shows the field empty and
-   cannot be stored until it is filled in. Any other extracted field, including
-   a previous unpaid balance, is neither shown to the reviewer nor kept.
+   entered; there is no "add a field" dropdown, only a merchant row that is
+   always shown even when the model read none. The corrections travel with the
+   answer and are what gets stored. The merchant is required: a document with
+   none shows the field empty with a red warning and cannot be stored until it
+   is filled in. Any other extracted field, including a previous unpaid
+   balance, is neither shown to the reviewer nor kept.
 7. The photo is deleted from blob storage as soon as it has been read, whether
    the analysis succeeded, failed or was rejected.
 

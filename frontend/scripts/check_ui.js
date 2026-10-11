@@ -61,9 +61,10 @@ const COMPLETE_STATUS = {
         DueDate: { value: "2026-03-01", confidence: 0.4 },
         AmountDue: { value: "120.00", confidence: 0.6 },
         SubTotal: { value: "100.00 EUR", confidence: null },
-        // TotalTax is deliberately absent, so the add control has something to
-        // offer. PreviousUnpaidBalance is not kept anywhere by this deployment,
-        // so the review screen must not show it either.
+        // TotalTax is deliberately absent: only what the model returned is on
+        // screen, since the add-a-field control is gone. PreviousUnpaidBalance
+        // is not kept anywhere by this deployment, so the review screen must
+        // not show it either.
         PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
         EmptyField: { value: "", confidence: 0.9 },
       },
@@ -629,6 +630,12 @@ async function captureAndUpload(win) {
     names.indexOf("Merchant") === 0,
     names.join(" | ")
   );
+  check(
+    "there is no add-a-field dropdown",
+    !win.document.querySelector(".fields__add") &&
+      !win.document.querySelector(".fields__add-select"),
+    "dropdown still present"
+  );
 
   const values = [...win.document.querySelectorAll(".fields__input")];
   const merchant = values.find((input) => input.value.includes("Acme"));
@@ -651,6 +658,11 @@ async function captureAndUpload(win) {
     "the due date is shown as DD/MM/YYYY",
     values.some((input) => input.value === "01/03/2026"),
     values.map((input) => input.value).join(" | ")
+  );
+  check(
+    "confirming is labelled Upload my invoice",
+    win.document.getElementById("photoOkay").textContent.trim() === "Upload my invoice",
+    win.document.getElementById("photoOkay").textContent.trim()
   );
   const badges = [...win.document.querySelectorAll(".confidence")].map((b) => ({
     text: b.textContent,
@@ -1211,59 +1223,30 @@ async function captureAndUpload(win) {
     merchantInput.value
   );
 
-  // Adding a missing field (TotalTax). Malformed values are refused outright,
-  // so a missing field is added with one good value or not at all.
-  const addSelect = win.document.querySelector(".fields__add-select");
-  const addInput = win.document.querySelector(".fields__add-input");
-  const addButton = win.document.querySelector(".fields__add-button");
+  // Adding a missing field (TotalTax) is no longer possible: the add-a-field
+  // dropdown is gone, so the reviewer edits only what the model returned or
+  // fills the required merchant where the model found none.
   check(
-    "the add control offers only the missing field",
-    !!addSelect && !!addButton &&
-      [...addSelect.options].some((option) => option.value === "TotalTax"),
+    "no add-a-field dropdown is present",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
-  );
-  addSelect.value = "TotalTax";
-  addInput.value = "12.5"; // needs two decimals
-  addButton.click();
-  await tick();
-  check(
-    "a malformed value is refused when adding a field",
-    inputField("TotalTax") === null &&
-      /Total tax/i.test(win.document.getElementById("status").textContent),
-    win.document.getElementById("status").textContent
-  );
-  addInput.value = "12.50";
-  addButton.click();
-  await tick();
-  check(
-    "a valid added field appears with the typed value",
-    inputField("TotalTax") && inputField("TotalTax").value === "12.50",
-    valuesOnScreen(win)
-  );
-  check(
-    "and is not offered a second time",
-    ![...addSelect.options].some((option) => option.value === "TotalTax")
-  );
-  check(
-    "the add control is hidden once nothing is missing",
-    !!win.document.querySelector(".fields__add").hidden
   );
 
   // Accepting while an edited value does not fit is refused, not sent.
-  const tax = inputField("TotalTax");
-  tax.value = "12.";
-  tax.dispatchEvent(new win.Event("input"));
+  const moneyField = inputField("InvoiceTotal");
+  moneyField.value = "12.";
+  moneyField.dispatchEvent(new win.Event("input"));
   const decisionsBefore = win.__fetchStub.decisions.length;
   win.document.getElementById("photoOkay").click();
   await wait(300);
   check(
     "accepting an edited value that does not fit is refused",
     win.__fetchStub.decisions.length === decisionsBefore &&
-      /Total tax/i.test(win.document.getElementById("status").textContent),
+      /Invoice total/i.test(win.document.getElementById("status").textContent),
     win.document.getElementById("status").textContent
   );
-  tax.value = "12.50";
-  tax.dispatchEvent(new win.Event("input"));
+  moneyField.value = "12.50";
+  moneyField.dispatchEvent(new win.Event("input"));
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const clean = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1275,7 +1258,7 @@ async function captureAndUpload(win) {
   }
   check(
     "the cleaned money travels in the corrections",
-    cleanFields.TotalTax && cleanFields.TotalTax.value === "12.50",
+    cleanFields.InvoiceTotal && cleanFields.InvoiceTotal.value === "12.50",
     JSON.stringify(cleanFields)
   );
   check(
@@ -1290,42 +1273,10 @@ async function captureAndUpload(win) {
     JSON.stringify(cleanFields)
   );
 
-  // Removing an added field takes it back out of the corrections.
-  win = buildDom({
-    analysisApiBaseUrl: "https://analysis.example",
-    statuses: [{ ...COMPLETE_STATUS, photoSatisfied: null }],
-  });
-  await tick();
-  await captureAndUpload(win);
-  await wait(1200);
-  const s2 = win.document.querySelector(".fields__add-select");
-  s2.value = "TotalTax";
-  win.document.querySelector(".fields__add-input").value = "12.50";
-  win.document.querySelector(".fields__add-button").click();
-  await tick();
-  const addedRow = [...win.document.querySelectorAll(".fields__row")]
-    .find((row) => row.dataset.field === "TotalTax");
-  addedRow.querySelector(".fields__remove").click();
-  win.document.getElementById("photoOkay").click();
-  await wait(300);
-  const afterRemove = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
-  let removedPayload = {};
-  try {
-    removedPayload = JSON.parse(afterRemove.body);
-  } catch {
-    // Reported by the check below.
-  }
-  const remaining = ((removedPayload.documents || [])[0] || {}).fields || {};
-  check(
-    "a removed field is left out of the corrections",
-    !remaining.TotalTax,
-    JSON.stringify(remaining)
-  );
-
   console.log("\n--- 20b. a missing merchant is required, not optional ---");
   // A document Document Intelligence read no merchant from shows the merchant
-  // row empty and prompting. It is not hidden away in the add control, and the
-  // document cannot be stored until the reviewer types one.
+  // row empty and prompting, and the document cannot be stored until the
+  // reviewer types one.
   win = buildDom({
     analysisApiBaseUrl: "https://analysis.example",
     statuses: [{ ...NO_MERCHANT_STATUS, photoSatisfied: null }],
@@ -1355,12 +1306,9 @@ async function captureAndUpload(win) {
       /required/i.test(merchantError.textContent),
     merchantError ? merchantError.textContent : "no error row"
   );
-  const merchantOffered = [...win.document.querySelectorAll(".fields__add-select")]
-    .flatMap((select) => [...select.options])
-    .some((option) => option.value === "VendorName");
   check(
-    "and not offered in the add control",
-    !merchantOffered,
+    "and there is no add control to find it in",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
   );
   const blockedDecisions = win.__fetchStub.decisions.length;
@@ -1422,19 +1370,14 @@ async function captureAndUpload(win) {
     valuesOnScreen(win)
   );
   check(
-    "and its missing fields can be added",
-    !!win.document.querySelector(".fields__add-select"),
+    "and there is no add-a-field dropdown either",
+    !win.document.querySelector(".fields__add-select"),
     valuesOnScreen(win)
   );
 
   const due = [...uploadInputs].find((input) => input.value === "01/03/2026");
   due.value = "01/05/2026";
   due.dispatchEvent(new win.Event("input"));
-  const uploadAddSelect = win.document.querySelector(".fields__add-select");
-  uploadAddSelect.value = "TotalTax";
-  win.document.querySelector(".fields__add-input").value = "12.50";
-  win.document.querySelector(".fields__add-button").click();
-  await tick();
   win.document.getElementById("photoOkay").click();
   await wait(300);
   const uploadDecision = win.__fetchStub.decisions[win.__fetchStub.decisions.length - 1];
@@ -1447,11 +1390,6 @@ async function captureAndUpload(win) {
   const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
   check(
     "accepting an uploaded photo sends its corrections",
-    uploadFields.TotalTax && uploadFields.TotalTax.value === "12.50",
-    JSON.stringify(uploadFields)
-  );
-  check(
-    "including the edited due date",
     uploadFields.DueDate && uploadFields.DueDate.value === "01/05/2026",
     JSON.stringify(uploadFields)
   );

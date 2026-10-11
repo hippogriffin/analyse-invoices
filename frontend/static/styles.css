@@ -392,58 +392,10 @@ body {
 .fields__error {
   color: var(--danger);
   flex-basis: 100%;
-  font-size: 0.8rem;
+  font-size: 1.05rem;
+  font-weight: 700;
   margin: 0;
   text-align: right;
-}
-
-.fields__remove {
-  background: transparent;
-  border: none;
-  color: var(--danger);
-  cursor: pointer;
-  font-size: 0.8rem;
-  padding: 4px;
-}
-
-.fields__add {
-  background: var(--surface-soft);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 10px;
-}
-
-.fields__add-select,
-.fields__add-input {
-  background: var(--surface);
-  border: 1px solid var(--text-muted);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.9rem;
-  padding: 8px 10px;
-  width: 100%;
-}
-
-.fields__add-input:focus,
-.fields__add-select:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-
-.fields__add-button {
-  background: var(--accent-strong);
-  border: none;
-  border-radius: 8px;
-  color: #04121f;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 600;
-  min-height: 38px;
-  padding: 0 14px;
-  width: 100%;
 }
 
 .confidence {

@@ -321,13 +321,14 @@ def test_extracted_values_are_never_inserted_as_html():
     )
 
 
-def test_only_reviewable_fields_can_be_edited_or_added():
+def test_only_reviewable_fields_can_be_edited():
     """The reviewer is trusted with a fixed list of fields, nothing else.
 
     Document Intelligence may return many more fields (a previous unpaid
     balance, an account number...), and the backend still stores them, but the
-    review screen shows exactly the fields a person may correct or add, so no
-    other value can be entered or pasted.
+    review screen shows exactly the extracted fields a person may correct, so
+    no other value can be entered or pasted. There is no add-a-field dropdown
+    to bring extra fields in by hand.
     """
     render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
     assert render, "renderDocument not found"
@@ -337,13 +338,8 @@ def test_only_reviewable_fields_can_be_edited_or_added():
     assert "renderFieldRow(" in render.group(0), (
         "each extracted field must render through the editable row builder"
     )
-    assert "buildAddFieldControl(" in render.group(0), (
-        "each document must offer the add-a-missing-field control"
-    )
-    add = re.search(r"function buildAddFieldControl\(.*?\n  \}", APP_JS, re.S)
-    assert add, "buildAddFieldControl not found"
-    assert "Object.entries(REVIEWABLE_FIELDS)" in add.group(0), (
-        "the add control must offer only the reviewable fields"
+    assert "buildAddFieldControl(" not in APP_JS, (
+        "the add-a-missing-field dropdown must be gone"
     )
     # The six trusted fields: merchant, date, and the four money amounts.
     assert re.search(r"VendorName\s*:\s*\{[^}]*type:\s*\"text\"", APP_JS), (
@@ -382,29 +378,27 @@ def test_field_values_are_validated_not_just_typed():
     )
 
 
-def test_every_field_is_editable_and_missing_ones_can_be_added():
-    """Some readings are wrong or incomplete, so the reviewer can fix them.
+def test_every_reviewed_field_is_editable():
+    """Readings can be wrong, so the reviewer can fix them.
 
-    Each value is an input, and each document offers a way to add a field
-    Document Intelligence did not return, such as a missing merchant.
+    Each reviewed value is an editable input, including the required merchant
+    when the model read none. There is no add-a-field dropdown: only what the
+    model returned is on screen.
     """
     row = re.search(r"function renderFieldRow\(.*?\n  \}", APP_JS, re.S)
     assert row, "renderFieldRow not found"
     assert 'document.createElement("input")' in row.group(0), (
         "field values must be editable inputs"
     )
-    add = re.search(r"function buildAddFieldControl\(.*?\n  \}", APP_JS, re.S)
-    assert add, "buildAddFieldControl not found"
-    assert 'textContent = "Add a missing field…"' in APP_JS, (
-        "the add-a-missing-field control must be offered"
-    )
-    # Added fields are removable; extracted ones are corrected instead.
     assert 'row.className = "fields__row"' in row.group(0)
     assert "row.dataset.field = name" in row.group(0), (
         "each row must record its field name for the corrections payload"
     )
     assert "row.dataset.changed = \"true\"" in APP_JS, (
-        "edited and added rows must be marked as changed"
+        "edited rows must be marked as changed"
+    )
+    assert "buildAddFieldControl(" not in APP_JS and ".fields__remove" not in APP_JS, (
+        "the add/remove-row control must be gone"
     )
 
 
@@ -413,8 +407,8 @@ def test_the_merchant_is_required():
 
     Document Intelligence reads a merchant most of the time, but a document it
     read none from must still be confirmable only with a value: the row is
-    rendered empty for the reviewer to type into, the add control does not offer
-    it, and accepting is refused until it holds something.
+    rendered empty for the reviewer to type into, and accepting is refused
+    until it holds something.
     """
     assert re.search(r"VendorName\s*:\s*\{[^}]*required\s*:\s*true", APP_JS), (
         "the merchant must be marked as the required field"
