@@ -138,18 +138,20 @@ after a restart hands back a stored reading. Nothing about a confidence score is
 carried in a correction: a reading rewritten by a person has no meaningful score.
 
 The values a reviewer may correct are a fixed, reviewed set: the merchant, the
-date, the invoice total, the subtotal, and the total tax. Anything else
-Document Intelligence returns is not offered for editing. In particular
-`PreviousUnpaidBalance` and `AmountDue` are not kept by this service at all:
-they are dropped from the extraction, so they are never stored, never returned,
-and a correction naming them is ignored rather than reintroducing them.
+invoice date, the invoice total, the subtotal, and the total tax. Storage is a
+strict whitelist: those five — stored as `VendorName`, `InvoiceDate`,
+`InvoiceTotal`, `SubTotal` and `TotalTax` — are the only fields this service
+keeps. Everything else Document Intelligence returns (an invoice id, a customer
+name, addresses, `PreviousUnpaidBalance`, `AmountDue`, ...) is dropped from the
+extraction, so it is never stored, never returned, and a correction naming one
+is ignored rather than reintroducing it.
 
 Every reviewed field is **required**: a document missing any of them — whether
 the model did not read it, or a correction cleared it — is refused with `422`
-and nothing is stored. The reviewer is asked for a merchant, a date, an invoice
-total, a subtotal and a total tax until all are read or typed, so a row in the
-table always has them; this is the backstop behind the UI, which shows the
-empty required rows and blocks the accept button for the same reason.
+and nothing is stored. The reviewer is asked for a merchant, an invoice date,
+an invoice total, a subtotal and a total tax until all are read or typed, so a
+row in the table always has them; this is the backstop behind the UI, which
+shows the empty required rows and blocks the accept button for the same reason.
 
 Saying no therefore takes the result away rather than recording an opinion about
 it. It deletes every row for the partition and returns `204` with no body, so the

@@ -58,14 +58,15 @@ const COMPLETE_STATUS = {
         // untrusted input, and the review screen must keep them as text.
         VendorName: { value: "Acme <b>Ltd</b> & Sons", confidence: 0.99 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
-        DueDate: { value: "2026-03-01", confidence: 0.4 },
+        InvoiceDate: { value: "2026-03-01", confidence: 0.4 },
         SubTotal: { value: "100.00 EUR", confidence: null },
         TotalTax: { value: "10.00 EUR", confidence: 0.9 },
-        // The add-a-field control is gone, so what the model returned is exactly
-        // what is on screen. PreviousUnpaidBalance and AmountDue are not kept
-        // anywhere by this deployment, so the review screen must not show them.
+        // The backend keeps only the five stored fields, so whatever else the
+        // model returns must not even show up here. PreviousUnpaidBalance,
+        // AmountDue and a customer name are all below the whitelist.
         PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
         AmountDue: { value: "120.00", confidence: 0.6 },
+        CustomerName: { value: "Buyer Corp", confidence: 0.9 },
         EmptyField: { value: "", confidence: 0.9 },
       },
     },
@@ -83,7 +84,7 @@ const NO_MERCHANT_STATUS = {
       index: 0,
       confidence: 0.95,
       fields: {
-        DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceDate: { value: "2026-03-01", confidence: 0.7 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         SubTotal: { value: "100.00 EUR", confidence: 0.8 },
         TotalTax: { value: "10.00 EUR", confidence: 0.9 },
@@ -104,7 +105,7 @@ const NO_TOTAX_STATUS = {
       confidence: 0.95,
       fields: {
         VendorName: { value: "Acme Ltd", confidence: 0.99 },
-        DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceDate: { value: "2026-03-01", confidence: 0.7 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         SubTotal: { value: "100.00 EUR", confidence: 0.8 },
       },
@@ -822,7 +823,7 @@ async function captureAndUpload(win) {
     names.join(" | ")
   );
   check(
-    "dropped fields (previous unpaid balance, amount due) are not shown",
+    "fields outside the stored whitelist are not shown",
     !names.includes("Previous unpaid balance") && !names.includes("Amount due"),
     names.join(" | ")
   );
@@ -1377,7 +1378,7 @@ async function captureAndUpload(win) {
   }
   check(
     "the corrections carry the edited date",
-    correctedFields.DueDate && correctedFields.DueDate.value === "2026-04-01",
+    correctedFields.InvoiceDate && correctedFields.InvoiceDate.value === "2026-04-01",
     JSON.stringify(correctedFields)
   );
   check(
@@ -1556,7 +1557,7 @@ async function captureAndUpload(win) {
   );
   check(
     "and the untouched values still stay off the wire",
-    !merchantFields.InvoiceTotal && !merchantFields.DueDate,
+    !merchantFields.InvoiceTotal && !merchantFields.InvoiceDate,
     JSON.stringify(merchantFields)
   );
 
@@ -1684,7 +1685,7 @@ async function captureAndUpload(win) {
   const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
   check(
     "accepting an uploaded photo sends its corrections",
-    uploadFields.DueDate && uploadFields.DueDate.value === "2026-05-01",
+    uploadFields.InvoiceDate && uploadFields.InvoiceDate.value === "2026-05-01",
     JSON.stringify(uploadFields)
   );
 

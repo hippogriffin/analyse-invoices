@@ -175,19 +175,19 @@ is trusted to correct, and nothing else:
 | Field | Shown as | Accepts |
 | ----- | -------- | ------- |
 | `VendorName` | Merchant | letters, numbers and spaces |
-| `DueDate` | Date | a date picked from the calendar, held as `YYYY-MM-DD` |
+| `InvoiceDate` | Date | a date picked from the calendar, held as `YYYY-MM-DD` |
 | `InvoiceTotal` | Invoice total | an amount with two decimals, shown as a bare number |
 | `SubTotal` | Subtotal | an amount with two decimals, shown as a bare number |
 | `TotalTax` | Total tax | an amount with two decimals, shown as a bare number |
 
-Any other extracted field is kept out of the review screen; the previous unpaid
-balance and the amount due in particular are never shown or stored by the
-service. Money is shown without its currency suffix and the date through the
-browser's own calendar input, because that is how the value will need to be
-typed — or picked — again.
+These five are the only fields the service keeps — the backend drops everything
+else Document Intelligence returns at extraction (an invoice id, a customer
+name, addresses, the previous unpaid balance, the amount due, ...) so no other
+value is ever on the wire or stored.
 
 Every reviewed field is **required**, the merchant no more and no less than the
-date, the invoice total, the subtotal and the total tax. A document the model
+invoice date, the invoice total, the subtotal and the total tax. A document the
+model
 read one of them from nothing shows that row empty, labelled with a red
 "... is required." warning, ready to be filled in — and the document cannot be
 accepted until every field holds a value. The backend enforces the same rule, so

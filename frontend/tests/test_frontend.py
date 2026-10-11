@@ -324,11 +324,10 @@ def test_extracted_values_are_never_inserted_as_html():
 def test_only_reviewable_fields_can_be_edited():
     """The reviewer is trusted with a fixed list of fields, nothing else.
 
-    Document Intelligence may return many more fields (a previous unpaid
-    balance, an account number...), and the backend still stores them, but the
-    review screen shows exactly the extracted fields a person may correct, so
-    no other value can be entered or pasted. There is no add-a-field dropdown
-    to bring extra fields in by hand.
+    The backend keeps a strict whitelist of exactly the five stored fields, and
+    the review screen shows those five — and only those — for correction, so no
+    other value can be entered or pasted. There is no add-a-field dropdown to
+    bring extra fields in by hand.
     """
     render = re.search(r"function renderDocument\(.*?\n  \}", APP_JS, re.S)
     assert render, "renderDocument not found"
@@ -349,14 +348,17 @@ def test_only_reviewable_fields_can_be_edited():
         assert re.search(
             rf"{money}\s*:\s*\{{[^}}]*type:\s*\"money\"", APP_JS
         ), f"{money} must be a money field"
-    assert re.search(r"DueDate\s*:\s*\{[^}]*type:\s*\"date\"", APP_JS), (
-        "Due date must be a date field"
+    assert re.search(r"InvoiceDate\s*:\s*\{[^}]*type:\s*\"date\"", APP_JS), (
+        "The invoice date must be a date field"
+    )
+    assert not re.search(r"DueDate\s*:\s*\{", APP_JS), (
+        "the date field is the model's InvoiceDate, not a payment due date"
     )
     assert not re.search(r"AmountDue\s*:\s*\{", APP_JS), (
         "the amount due is not kept by this deployment, so it must not be a "
         "reviewable field"
     )
-    for field in ("VendorName", "DueDate", "InvoiceTotal", "SubTotal", "TotalTax"):
+    for field in ("VendorName", "InvoiceDate", "InvoiceTotal", "SubTotal", "TotalTax"):
         assert re.search(
             rf"{field}\s*:\s*\{{[^}}]*required:\s*true", APP_JS
         ), f"{field} must be required"
@@ -462,15 +464,14 @@ def test_the_total_tax_is_required():
 
 
 def test_the_date_invoice_total_and_subtotal_are_required():
-    """The date, invoice total and subtotal are required, like merchant and tax.
+    """The invoice date, invoice total and subtotal are required, like merchant
+    and tax.
 
-    Every field on the review screen except the previous unpaid balance (which
-    this deployment drops wholesale) must end up in the stored record: the date
-    is picked from a calendar, the invoice total and subtotal are amounts with
-    two decimals, and all render empty and warning when the model did not read
-    them.
+    Every field on the review screen is stored: the date is picked from a
+    calendar, the invoice total and subtotal are amounts with two decimals, and
+    all render empty and warning when the model did not read them.
     """
-    for field in ("DueDate", "InvoiceTotal", "SubTotal"):
+    for field in ("InvoiceDate", "InvoiceTotal", "SubTotal"):
         assert re.search(
             rf"{field}\s*:\s*\{{[^}}]*required\s*:\s*true", APP_JS
         ), f"{field} must be marked required"

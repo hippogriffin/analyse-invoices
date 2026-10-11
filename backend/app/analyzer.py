@@ -1,13 +1,10 @@
 """Download a captured photo and read its invoice fields.
 
-The field walk is generic on purpose: prebuilt-invoice returns a different
-field set per industry, and a hardcoded list would silently drop fields. Every
-field the model returns is captured, with its confidence, so adding a field
-never needs a code change.
-
-The one exception is fields this deployment does not want kept by anyone, not
-even a reviewer. The frontend never shows these, and they are filtered here so
-they never reach a screen, a stored row, or a response.
+Only the five fields this deployment keeps are captured: the store is a strict
+whitelist. Everything else prebuilt-invoice returns — a customer name, an
+invoice id, addresses, a previous balance, the amount due — is filtered out
+here so it never reaches a screen, a stored row, or a response. Adding a
+Document Intelligence field can never widen what this service keeps.
 """
 
 from __future__ import annotations
@@ -31,9 +28,13 @@ logger = logging.getLogger(__name__)
 
 MAX_BLOB_BYTES = 50 * 1024 * 1024
 
-# Fields this deployment does not store or return anywhere. The frontend never
-# offers these for editing either, so the one filter here covers every path.
-DROPPED_FIELDS = frozenset({"PreviousUnpaidBalance", "AmountDue"})
+# The only fields this deployment stores, shows or returns. A strict whitelist:
+# anything else Document Intelligence returns is dropped at extraction, so no
+# value outside this set can reach a screen, a stored row, or a response, and
+# the stored record always has exactly these columns.
+STORED_FIELDS = frozenset(
+    {"InvoiceDate", "InvoiceTotal", "SubTotal", "TotalTax", "VendorName"}
+)
 
 DI_ENDPOINT_HINT = (
     "Check DOCUMENT_INTELLIGENCE_ENDPOINT: it must be the Document Intelligence "
@@ -79,7 +80,7 @@ def _to_documents(result: object) -> list[ExtractedDocument]:
             (getattr(document, "fields", None) or {}).items()
         ):
             raw_value, confidence = _read_field(field)
-            if name in DROPPED_FIELDS:
+            if name not in STORED_FIELDS:
                 continue
             items.append(
                 ExtractedField(name=name, value=coerce(raw_value), confidence=confidence)

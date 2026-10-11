@@ -28,7 +28,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, Upl
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.analyzer import AnalysisError, DROPPED_FIELDS, analyze, download_photo
+from app.analyzer import AnalysisError, STORED_FIELDS, analyze, download_photo
 from app.clients import NotConfiguredError, StorageWriteError, ensure_table
 from app.config import JobStatus, get_settings
 from app.job_state import get_job_state, overlay
@@ -307,10 +307,11 @@ def create_app() -> FastAPI:
             satisfied = state.satisfied
         body["error"] = state.error if state else None
         body["photoSatisfied"] = satisfied
-        # Dropped fields are never shown, whatever the source: the analysis
-        # should never hold one, but a row may have been written before this
-        # filter existed, and the held state forgets nothing it already had.
-        body["documents"] = _without_dropped_fields(body["documents"])
+        # Only the stored fields are ever shown, whatever the source: the
+        # analysis keeps exactly this whitelist, but a row may have been written
+        # before the filter existed, and the held state forgets nothing it
+        # already had.
+        body["documents"] = _only_stored_fields(body["documents"])
         return InvoiceStatusOut.model_validate(body)
 
     @app.get(
@@ -430,16 +431,21 @@ def _response_documents(
     be applied without caring which source is current.
     """
     if held is not None and held.documents:
-        return list(_without_dropped_fields(held.documents))
+        return list(_only_stored_fields(held.documents))
     if record is not None:
-        return _without_dropped_fields([document.as_dict() for document in record.documents])
+        return _only_stored_fields([document.as_dict() for document in record.documents])
     return []
 
 
-def _without_dropped_fields(
+def _only_stored_fields(
     documents: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Drop the fields this deployment keeps nowhere at all."""
+    """Keep only the fields this deployment stores, everywhere a value can leave.
+
+    The whitelist already gates extraction and corrections, so this is a guard
+    for anything that slipped past them: a row written before the filter
+    existed, or a held result that already carried extra fields.
+    """
     cleaned: list[dict[str, Any]] = []
     for document in documents:
         document = dict(document)
@@ -447,7 +453,7 @@ def _without_dropped_fields(
         document["fields"] = {
             name: value
             for name, value in fields.items()
-            if name not in DROPPED_FIELDS
+            if name in STORED_FIELDS
         }
         cleaned.append(document)
     return cleaned
@@ -456,12 +462,12 @@ def _without_dropped_fields(
 # Fields that must end up in every stored record. Order matters for the error
 # message, so a document missing several is told about the first one, the way
 # the UI prompts.
-REQUIRED_FIELDS = ("VendorName", "DueDate", "InvoiceTotal", "SubTotal", "TotalTax")
+REQUIRED_FIELDS = ("VendorName", "InvoiceDate", "InvoiceTotal", "SubTotal", "TotalTax")
 
 # How each required field is named to a person, matching the frontend labels.
 REQUIRED_FIELD_LABELS = {
     "VendorName": "merchant",
-    "DueDate": "date",
+    "InvoiceDate": "date",
     "InvoiceTotal": "invoice total",
     "SubTotal": "subtotal",
     "TotalTax": "total tax",
@@ -516,15 +522,15 @@ def _apply_corrections(
     names are overridden; a field the reviewer cleared becomes an empty value.
     Anything not mentioned keeps its extracted value, and a correction for a
     page the model did not return is ignored, so a wrong index can never invent
-    a document. Fields this deployment drops are ignored even if a client names
-    them, so a dropped field can never be reintroduced through a correction.
+    a document. Corrections may only touch the stored whitelist, so a field
+    this deployment keeps nowhere cannot be smuggled back in through one.
     """
     by_index: dict[int, dict[str, DocumentFieldPatch]] = {}
     for patch in corrections.documents:
         by_index[patch.index] = {
             name: field
             for name, field in patch.fields.items()
-            if name not in DROPPED_FIELDS
+            if name in STORED_FIELDS
         }
     if not by_index:
         return list(documents)
