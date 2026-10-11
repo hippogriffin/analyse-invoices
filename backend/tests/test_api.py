@@ -38,7 +38,7 @@ def stub_azure(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
                 confidence=0.98,
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
-                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                     ExtractedField("SubTotal", "100.00 EUR", 0.8),
                     ExtractedField("TotalTax", "10.00 EUR", 0.9),
@@ -416,17 +416,19 @@ class TestAPhotoVerdict:
         assert client.delete(f"/api/invoices/{PARTITION}/photo").status_code == 204
 
 
-class TestADroppedField:
-    """Dropped fields are kept nowhere, by nobody.
+class TestOnlyTheStoredFields:
+    """Only the five stored fields are kept, by nobody else.
 
-    Some invoice values there is nothing trustworthy left to do with — a
-    previous balance, or the amount due — so no reviewer is supposed to
-    confirm them. The UI never offers them, and the backend filters each at
-    every point a value could enter or leave, so the field cannot be shown,
-    stored or smuggled back in through a correction.
+    The stored record is a strict whitelist: the invoice date, the invoice
+    total, the subtotal, the total tax and the merchant. Everything else the
+    model returns — an invoice id, a customer name, a previous balance, the
+    amount due — is filtered at extraction, and the backend re-checks the
+    whitelist at every point a value could enter or leave, so an extra field
+    cannot be shown, stored or smuggled back in through a correction. Corrections
+    may only touch exactly those five fields.
     """
 
-    def test_a_dropped_field_never_reaches_the_response(
+    def test_unlisted_fields_never_reach_the_response(
         self, client, stub_azure
     ) -> None:
         stub_azure["documents"] = [
@@ -436,6 +438,8 @@ class TestADroppedField:
                     ExtractedField("VendorName", "Acme", 0.99),
                     ExtractedField("PreviousUnpaidBalance", "50.00 EUR", 0.9),
                     ExtractedField("AmountDue", "120.00 EUR", 0.6),
+                    ExtractedField("InvoiceId", "INV-1", 0.9),
+                    ExtractedField("CustomerName", "Buyer Corp", 0.9),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                 ],
             )
@@ -443,11 +447,9 @@ class TestADroppedField:
         post_photo(client)
         body = client.get(f"/api/invoices/{PARTITION}").json()
         names = body["documents"][0]["fields"].keys()
-        assert "PreviousUnpaidBalance" not in names
-        assert "AmountDue" not in names
         assert set(names) == {"VendorName", "InvoiceTotal"}
 
-    def test_a_dropped_field_is_not_stored_on_accept(
+    def test_unlisted_fields_are_not_stored_on_accept(
         self, client, stub_azure, table
     ) -> None:
         post_photo(client)
@@ -461,6 +463,8 @@ class TestADroppedField:
                             "VendorName": {"value": "Renamed"},
                             "PreviousUnpaidBalance": {"value": "1.00 EUR"},
                             "AmountDue": {"value": "2.00 EUR"},
+                            "CustomerName": {"value": "Smuggled Corp"},
+                            "InvoiceId": {"value": "INV-9"},
                         },
                     }
                 ]
@@ -471,8 +475,44 @@ class TestADroppedField:
         assert row["f_VendorName"] == "Renamed"
         assert not [name for name in row if name.startswith("f_PreviousUnpaidBalance")]
         assert not [name for name in row if name.startswith("f_AmountDue")]
+        assert not [name for name in row if name.startswith("f_CustomerName")]
+        assert not [name for name in row if name.startswith("f_InvoiceId")]
 
-    def test_a_stored_dropped_field_is_filtered_from_the_response(
+    def test_a_stored_record_keeps_only_the_five_columns(
+        self, client, stub_azure, table
+    ) -> None:
+        """Whatever the model returned, the table gets exactly the whitelist."""
+        stub_azure["documents"] = [
+            ExtractedDocument(
+                index=0,
+                fields=[
+                    ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("InvoiceDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
+                    ExtractedField("TotalTax", "10.00 EUR", 0.9),
+                    ExtractedField("CustomerName", "Buyer Corp", 0.9),
+                    ExtractedField("InvoiceId", "INV-1", 0.9),
+                ],
+            )
+        ]
+        post_photo(client)
+        response = client.post(f"/api/invoices/{PARTITION}/photo")
+        assert response.status_code == 200
+        stored = {
+            name.removeprefix("f_")
+            for name in table.entities[(PARTITION, "doc-000")]
+            if name.startswith("f_")
+        }
+        assert stored == {
+            "InvoiceDate",
+            "InvoiceTotal",
+            "SubTotal",
+            "TotalTax",
+            "VendorName",
+        }
+
+    def test_a_stored_unlisted_field_is_filtered_from_the_response(
         self, client, settings, table
     ) -> None:
         """A row written before the filter existed still never returns the field."""
@@ -550,7 +590,7 @@ class TestAMerchantIsRequired:
             ExtractedDocument(
                 index=0,
                 fields=[
-                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                     ExtractedField("SubTotal", "100.00 EUR", 0.8),
                     ExtractedField("TotalTax", "10.00 EUR", 0.9),
@@ -589,7 +629,7 @@ class TestTotalTaxIsRequired:
                 index=0,
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
-                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                     ExtractedField("SubTotal", "100.00 EUR", 0.8),
                 ],
@@ -631,7 +671,7 @@ class TestTotalTaxIsRequired:
                 index=0,
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
-                    ExtractedField("DueDate", "2026-03-01", 0.7),
+                    ExtractedField("InvoiceDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                     ExtractedField("SubTotal", "100.00 EUR", 0.8),
                 ],

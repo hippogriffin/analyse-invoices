@@ -90,10 +90,10 @@
   const MIN_CROP_PERCENT = 10;
 
   // The only fields a reviewer may correct, and the exact kind of value each may
-  // hold. VendorName reads as "Merchant" to match the existing downstream
-  // schema. Everything else Document Intelligence returns is still stored by
-  // the backend, but is not shown here so nothing outside this list can be
-  // edited or injected.
+  // hold. VendorName reads as "Merchant" and InvoiceDate as "Date" to match the
+  // existing downstream schema. Everything else Document Intelligence returns is
+  // dropped by the backend before it is even returned, so nothing outside this
+  // list can be edited or injected.
   const REVIEWABLE_FIELDS = {
     // The merchant is required: a document with no merchant cannot be stored,
     // so it is shown as an empty row warning to be filled in.
@@ -101,7 +101,7 @@
     // The date, invoice total and subtotal are required as well: a record
     // must have all of them before it is written. The date is picked from a
     // calendar, not typed, so the field is rendered as a date input.
-    DueDate: { label: "Date", type: "date", required: true },
+    InvoiceDate: { label: "Date", type: "date", required: true },
     InvoiceTotal: { label: "Invoice total", type: "money", required: true },
     SubTotal: { label: "Subtotal", type: "money", required: true },
     // The total tax is required like the merchant: the document cannot be

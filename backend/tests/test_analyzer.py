@@ -173,7 +173,7 @@ class TestToDocuments:
                     fields={
                         "VendorName": Field(value_string="Acme", confidence=0.99),
                         "InvoiceTotal": Field(value_string="99.00"),
-                        "InvoiceId": Field(value_string="INV-1"),
+                        "InvoiceDate": Field(value_date="2026-03-01"),
                     }
                 )
             ]
@@ -181,7 +181,7 @@ class TestToDocuments:
         documents = _to_documents(result)
         assert len(documents) == 1
         assert [item.name for item in documents[0].fields] == [
-            "InvoiceId",
+            "InvoiceDate",
             "InvoiceTotal",
             "VendorName",
         ]
@@ -195,20 +195,26 @@ class TestToDocuments:
         result = Result(documents=[Document(fields={})])
         assert _to_documents(result)[0].fields == []
 
-    def test_a_dropped_field_never_makes_it_out_of_extraction(self) -> None:
-        """Dropped fields are not kept anywhere, not even for a reviewer.
+    def test_only_the_stored_fields_survive_extraction(self) -> None:
+        """Extraction is a strict whitelist: nothing else leaves the model.
 
-        Some invoice values there is nothing trustworthy left to do with — a
-        previous balance, or the amount due — so they are filtered at the
-        source: no screen, stored row or response can ever contain them.
+        Only the five kept fields may ever reach a screen, a stored row or a
+        response. Everything else prebuilt-invoice returns — an invoice id, a
+        customer name, a previous balance, the amount due — is filtered at the
+        source so no later path has to remember to drop it.
         """
         result = Result(
             documents=[
                 Document(
                     fields={
                         "VendorName": Field(value_string="Acme"),
-                        "PreviousUnpaidBalance": Field(value_string="50.00 EUR"),
+                        "InvoiceDate": Field(value_date="2026-03-01"),
                         "InvoiceTotal": Field(value_string="120.00 EUR"),
+                        "SubTotal": Field(value_string="100.00 EUR"),
+                        "TotalTax": Field(value_string="10.00 EUR"),
+                        "InvoiceId": Field(value_string="INV-1"),
+                        "CustomerName": Field(value_string="Buyer Corp"),
+                        "PreviousUnpaidBalance": Field(value_string="50.00 EUR"),
                         "AmountDue": Field(value_string="120.00 EUR"),
                     }
                 )
@@ -216,7 +222,10 @@ class TestToDocuments:
         )
         documents = _to_documents(result)
         assert [item.name for item in documents[0].fields] == [
+            "InvoiceDate",
             "InvoiceTotal",
+            "SubTotal",
+            "TotalTax",
             "VendorName",
         ]
 
