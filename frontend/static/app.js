@@ -78,10 +78,12 @@
     // The merchant is required: a document with no merchant cannot be stored,
     // so it is shown as an empty row warning to be filled in.
     VendorName: { label: "Merchant", type: "text", required: true },
-    DueDate: { label: "Due date", type: "date" },
-    InvoiceTotal: { label: "Invoice total", type: "money" },
-    AmountDue: { label: "Amount due", type: "money" },
-    SubTotal: { label: "Subtotal", type: "money" },
+    // The date, invoice total and subtotal are required as well: a record
+    // must have all of them before it is written. The date is picked from a
+    // calendar, not typed, so the field is rendered as a date input.
+    DueDate: { label: "Date", type: "date", required: true },
+    InvoiceTotal: { label: "Invoice total", type: "money", required: true },
+    SubTotal: { label: "Subtotal", type: "money", required: true },
     // The total tax is required like the merchant: the document cannot be
     // stored without it, so an empty warning row asks for it too.
     TotalTax: { label: "Total tax", type: "money", required: true },
@@ -93,7 +95,7 @@
   // How to say what an edited value must look like, per field type.
   const VALID_HINTS = {
     money: "an amount with two decimals, like 120.00",
-    date: "a date as DD/MM/YYYY",
+    date: "a full date chosen from the calendar",
     text: "only letters, numbers and spaces",
   };
 
@@ -828,9 +830,10 @@
   /**
    * What an extracted value is shown as before anyone edits it.
    *
-   * Money values arrive with a currency suffix ("120.00 EUR") and dates arrive
-   * as ISO (2026-03-01); both are shown the way a person would type them, so
-   * the field reads as editable at a glance.
+   * Money values arrive with a currency suffix ("120.00 EUR") and are shown
+   * the way a person would type them, so the field reads as editable at a
+   * glance. Dates are left as-is: a date input renders the ISO value through
+   * its own calendar.
    */
   function displayFor(type, value) {
     const text = String(value);
@@ -838,18 +841,14 @@
       const amount = text.match(/\d+(?:\.\d{1,2})?/);
       return amount ? amount[0] : text;
     }
-    if (type === "date") {
-      const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : text;
-    }
     return text;
   }
 
   /**
    * Strip anything a field type can never hold, as the reviewer types or
-   * pastes. Money keeps digits and one decimal point; a date keeps digits and
-   * is laid out as DD/MM/YYYY; a merchant keeps letters, numbers and spaces
-   * only, so command syntax and markup cannot be entered.
+   * pastes. Money keeps digits and one decimal point; a merchant keeps
+   * letters, numbers and spaces only, so command syntax and markup cannot be
+   * entered. Dates are picked from a calendar, so there is nothing to clean.
    */
   function sanitizeFor(type, value) {
     if (type === "money") {
@@ -862,12 +861,6 @@
       }
       return cleaned;
     }
-    if (type === "date") {
-      const digits = value.replace(/\D/g, "").slice(0, 8);
-      return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
-        .filter((part) => part !== "")
-        .join("/");
-    }
     return value.replace(/[^\p{L}\p{N} ]/gu, "");
   }
 
@@ -877,20 +870,7 @@
   function isValidValue(type, value) {
     if (value === "") return true;
     if (type === "money") return /^\d+\.\d{2}$/.test(value);
-    if (type === "date") {
-      const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
-      if (!match) return false;
-      const day = Number(match[1]);
-      const month = Number(match[2]);
-      const year = Number(match[3]);
-      if (year < 1900 || year > 2200) return false;
-      const probe = new Date(Date.UTC(year, month - 1, day));
-      return (
-        probe.getUTCFullYear() === year &&
-        probe.getUTCMonth() === month - 1 &&
-        probe.getUTCDate() === day
-      );
-    }
+    if (type === "date") return /^\d{4}-\d{2}-\d{2}$/.test(value);
     return /^[\p{L}\p{N} ]+$/u.test(value);
   }
 
@@ -936,12 +916,21 @@
 
     // Assigned through .value, never as markup: OCR output is untrusted input.
     const input = document.createElement("input");
-    input.type = "text";
     input.className = "fields__input";
     input.setAttribute("aria-label", reviewable.label);
-    input.value = displayFor(reviewable.type, field.value);
+    if (reviewable.type === "date") {
+      // A calendar field: the browser offers the year, month and day to pick,
+      // and holds the value as ISO (YYYY-MM-DD) with nothing to sanitize.
+      input.type = "date";
+      input.value = String(field.value ?? "");
+    } else {
+      input.type = "text";
+      input.value = displayFor(reviewable.type, field.value);
+    }
     input.addEventListener("input", () => {
-      input.value = sanitizeFor(reviewable.type, input.value);
+      if (reviewable.type !== "date") {
+        input.value = sanitizeFor(reviewable.type, input.value);
+      }
       row.dataset.changed = "true";
       state.edited = true;
       const badge = value.querySelector(".confidence");

@@ -341,17 +341,25 @@ def test_only_reviewable_fields_can_be_edited():
     assert "buildAddFieldControl(" not in APP_JS, (
         "the add-a-missing-field dropdown must be gone"
     )
-    # The six trusted fields: merchant, date, and the four money amounts.
+    # The five trusted fields: merchant, date, and the three money amounts.
     assert re.search(r"VendorName\s*:\s*\{[^}]*type:\s*\"text\"", APP_JS), (
         "Merchant must be a free text field"
     )
-    for money in ("InvoiceTotal", "AmountDue", "SubTotal", "TotalTax"):
+    for money in ("InvoiceTotal", "SubTotal", "TotalTax"):
         assert re.search(
             rf"{money}\s*:\s*\{{[^}}]*type:\s*\"money\"", APP_JS
         ), f"{money} must be a money field"
     assert re.search(r"DueDate\s*:\s*\{[^}]*type:\s*\"date\"", APP_JS), (
         "Due date must be a date field"
     )
+    assert not re.search(r"AmountDue\s*:\s*\{", APP_JS), (
+        "the amount due is not kept by this deployment, so it must not be a "
+        "reviewable field"
+    )
+    for field in ("VendorName", "DueDate", "InvoiceTotal", "SubTotal", "TotalTax"):
+        assert re.search(
+            rf"{field}\s*:\s*\{{[^}}]*required:\s*true", APP_JS
+        ), f"{field} must be required"
 
 
 def test_field_values_are_validated_not_just_typed():
@@ -366,8 +374,8 @@ def test_field_values_are_validated_not_just_typed():
     assert r"/^\d+\.\d{2}$/" in APP_JS, (
         "money must be digits with exactly two decimals"
     )
-    assert r"/^(\d{2})\/(\d{2})\/(\d{4})$/" in APP_JS, (
-        "dates must be validated as DD/MM/YYYY"
+    assert r"/^\d{4}-\d{2}-\d{2}$/" in APP_JS, (
+        "a date must be a full ISO value from the calendar"
     )
     assert r"\p{L}\p{N} " in APP_JS, (
         "a merchant must allow only letters, numbers and spaces"
@@ -450,6 +458,29 @@ def test_the_total_tax_is_required():
     assert render, "renderDocument not found"
     assert re.search(r"reviewable\.required\s*&&\s*!fields\.has\(", render.group(0)), (
         "a required field must be rendered even when the model did not return it"
+    )
+
+
+def test_the_date_invoice_total_and_subtotal_are_required():
+    """The date, invoice total and subtotal are required, like merchant and tax.
+
+    Every field on the review screen except the previous unpaid balance (which
+    this deployment drops wholesale) must end up in the stored record: the date
+    is picked from a calendar, the invoice total and subtotal are amounts with
+    two decimals, and all render empty and warning when the model did not read
+    them.
+    """
+    for field in ("DueDate", "InvoiceTotal", "SubTotal"):
+        assert re.search(
+            rf"{field}\s*:\s*\{{[^}}]*required\s*:\s*true", APP_JS
+        ), f"{field} must be marked required"
+    row = re.search(r"function renderFieldRow\(.*?\n  \}", APP_JS, re.S)
+    assert row, "renderFieldRow not found"
+    assert 'input.type = "date"' in row.group(0), (
+        "the date must be a calendar input, not typed as text"
+    )
+    assert 'input.value = String(field.value ?? "")' in row.group(0), (
+        "a calendar input must show the raw ISO date, no re-formatting"
     )
 
 

@@ -164,33 +164,33 @@ is trusted to correct, and nothing else:
 | Field | Shown as | Accepts |
 | ----- | -------- | ------- |
 | `VendorName` | Merchant | letters, numbers and spaces |
-| `DueDate` | Due date | a date, shown and entered as `DD/MM/YYYY` |
+| `DueDate` | Date | a date picked from the calendar, held as `YYYY-MM-DD` |
 | `InvoiceTotal` | Invoice total | an amount with two decimals, shown as a bare number |
-| `AmountDue` | Amount due | an amount with two decimals, shown as a bare number |
 | `SubTotal` | Subtotal | an amount with two decimals, shown as a bare number |
-| `TotalTax` | Total tax | an amount with two decimals, shown as a bare number; required |
+| `TotalTax` | Total tax | an amount with two decimals, shown as a bare number |
 
 Any other extracted field is kept out of the review screen; the previous unpaid
-balance in particular is never shown or stored by the service. Money is shown
-without its currency suffix and dates as `DD/MM/YYYY`, because that is how the
-value will need to be typed again.
+balance and the amount due in particular are never shown or stored by the
+service. Money is shown without its currency suffix and the date through the
+browser's own calendar input, because that is how the value will need to be
+typed — or picked — again.
 
-The merchant is **required**, and so is the **total tax**. A document whose
-merchant or total tax was not read shows that row empty, labelled with a red
-"... is required." warning, ready to type into — and the document cannot be
-accepted until both fields hold values. The backend enforces the same rule, so
+Every reviewed field is **required**, the merchant no more and no less than the
+date, the invoice total, the subtotal and the total tax. A document the model
+read one of them from nothing shows that row empty, labelled with a red
+"... is required." warning, ready to be filled in — and the document cannot be
+accepted until every field holds a value. The backend enforces the same rule, so
 nothing is stored without them.
 
 There is no **Add a missing field** dropdown: the screen shows exactly the
-fields the model returned (plus, always, the merchant row). A field Document
+fields the model returned (plus, always, any required row). A field Document
 Intelligence did not read simply is not on screen. Values are constrained as
 they are typed or pasted (money strips letters, a merchant strips markup and
-punctuation, a date accepts digits only), and accepting is refused while an
-edited value does not fit. Nothing is kept off by wanting to type "*120.00
-EUR*": only the bare number is accepted, because the two decimals are the
-exactness invoice values are matched on. Editing a value withdraws its
-confidence badge, because the score described the automatic reading, not what
-the reviewer typed.
+punctuation), and accepting is refused while an edited value does not fit.
+Nothing is kept off by wanting to type "*120.00 EUR*": only the bare number is
+accepted, because the two decimals are the exactness invoice values are matched
+on. Editing a value withdraws its confidence badge, because the score described
+the automatic reading, not what the reviewer typed.
 
 The corrections travel with the **Upload my invoice** answer as a JSON body on
 `POST /api/invoices/{id}/photo`, and the backend merges them over the extracted

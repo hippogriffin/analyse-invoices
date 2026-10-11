@@ -59,13 +59,13 @@ const COMPLETE_STATUS = {
         VendorName: { value: "Acme <b>Ltd</b> & Sons", confidence: 0.99 },
         InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.4 },
-        AmountDue: { value: "120.00", confidence: 0.6 },
         SubTotal: { value: "100.00 EUR", confidence: null },
         TotalTax: { value: "10.00 EUR", confidence: 0.9 },
         // The add-a-field control is gone, so what the model returned is exactly
-        // what is on screen. PreviousUnpaidBalance is not kept anywhere by this
-        // deployment, so the review screen must not show it either.
+        // what is on screen. PreviousUnpaidBalance and AmountDue are not kept
+        // anywhere by this deployment, so the review screen must not show them.
         PreviousUnpaidBalance: { value: "50.00 EUR", confidence: 0.8 },
+        AmountDue: { value: "120.00", confidence: 0.6 },
         EmptyField: { value: "", confidence: 0.9 },
       },
     },
@@ -83,8 +83,9 @@ const NO_MERCHANT_STATUS = {
       index: 0,
       confidence: 0.95,
       fields: {
-        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        SubTotal: { value: "100.00 EUR", confidence: 0.8 },
         TotalTax: { value: "10.00 EUR", confidence: 0.9 },
       },
     },
@@ -103,8 +104,9 @@ const NO_TOTAX_STATUS = {
       confidence: 0.95,
       fields: {
         VendorName: { value: "Acme Ltd", confidence: 0.99 },
-        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
         DueDate: { value: "2026-03-01", confidence: 0.7 },
+        InvoiceTotal: { value: "120.00 EUR", confidence: 0.9 },
+        SubTotal: { value: "100.00 EUR", confidence: 0.8 },
       },
     },
   ],
@@ -633,17 +635,17 @@ async function captureAndUpload(win) {
   check(
     "only the reviewed fields are on the screen",
     names.join(" | ") ===
-      "Merchant | Due date | Invoice total | Amount due | Subtotal | Total tax",
+      "Merchant | Date | Invoice total | Subtotal | Total tax",
     names.join(" | ")
   );
   check(
-    "a dropped field (previous unpaid balance) is not shown",
-    !names.includes("Previous unpaid balance"),
+    "dropped fields (previous unpaid balance, amount due) are not shown",
+    !names.includes("Previous unpaid balance") && !names.includes("Amount due"),
     names.join(" | ")
   );
   check(
     "empty non-required values are omitted",
-    names.length === 6,
+    names.length === 5,
     names.join(" | ")
   );
   check(
@@ -667,19 +669,23 @@ async function captureAndUpload(win) {
   );
   check(
     "every value is an editable input",
-    values.length === 6,
+    values.length === 5,
     `${values.length} input(s)`
   );
   check(
     "money is shown without its currency suffix",
-    values.filter((input) => /^\d+\.\d{2}$/.test(input.value)).length === 4 &&
+    values.filter((input) => /^\d+\.\d{2}$/.test(input.value)).length === 3 &&
       values.some((input) => input.value === "120.00") &&
+      values.some((input) => input.value === "100.00") &&
       values.some((input) => input.value === "10.00"),
     values.map((input) => input.value).join(" | ")
   );
   check(
-    "the due date is shown as DD/MM/YYYY",
-    values.some((input) => input.value === "01/03/2026"),
+    "the date is a calendar field showing the ISO value",
+    values.some(
+      (input) =>
+        input.getAttribute("type") === "date" && input.value === "2026-03-01"
+    ),
     values.map((input) => input.value).join(" | ")
   );
   check(
@@ -1154,14 +1160,14 @@ async function captureAndUpload(win) {
   await wait(1200);
 
   const dueDate = [...win.document.querySelectorAll(".fields__input")]
-    .find((input) => input.value === "01/03/2026");
+    .find((input) => input.getAttribute("type") === "date" && input.value === "2026-03-01");
   check(
-    "an extracted due date is editable",
+    "an extracted date is editable through its calendar field",
     !!dueDate && dueDate instanceof win.HTMLInputElement,
     valuesOnScreen(win)
   );
   if (dueDate) {
-    dueDate.value = "01/04/2026";
+    dueDate.value = "2026-04-01";
     dueDate.dispatchEvent(new win.Event("input"));
   }
   // Correcting an extracted value withdraws its confidence badge: the score
@@ -1188,13 +1194,13 @@ async function captureAndUpload(win) {
   }
   check(
     "the corrections carry the edited date",
-    correctedFields.DueDate && correctedFields.DueDate.value === "01/04/2026",
+    correctedFields.DueDate && correctedFields.DueDate.value === "2026-04-01",
     JSON.stringify(correctedFields)
   );
   check(
     "and nothing the reviewer left alone",
     !correctedFields.VendorName && !correctedFields.InvoiceTotal &&
-      !correctedFields.AmountDue && !correctedFields.SubTotal,
+      !correctedFields.SubTotal,
     JSON.stringify(correctedFields)
   );
 
@@ -1292,7 +1298,7 @@ async function captureAndUpload(win) {
   );
   check(
     "while untouched values stay off the wire",
-    !cleanFields.AmountDue && !cleanFields.SubTotal,
+    !cleanFields.SubTotal && !cleanFields.TotalTax,
     JSON.stringify(cleanFields)
   );
 
@@ -1478,8 +1484,10 @@ async function captureAndUpload(win) {
     valuesOnScreen(win)
   );
 
-  const due = [...uploadInputs].find((input) => input.value === "01/03/2026");
-  due.value = "01/05/2026";
+  const due = [...uploadInputs].find(
+    (input) => input.getAttribute("type") === "date" && input.value === "2026-03-01"
+  );
+  due.value = "2026-05-01";
   due.dispatchEvent(new win.Event("input"));
   win.document.getElementById("photoOkay").click();
   await wait(300);
@@ -1493,7 +1501,7 @@ async function captureAndUpload(win) {
   const uploadFields = ((uploadPayload.documents || [])[0] || {}).fields || {};
   check(
     "accepting an uploaded photo sends its corrections",
-    uploadFields.DueDate && uploadFields.DueDate.value === "01/05/2026",
+    uploadFields.DueDate && uploadFields.DueDate.value === "2026-05-01",
     JSON.stringify(uploadFields)
   );
 

@@ -417,12 +417,13 @@ class TestAPhotoVerdict:
 
 
 class TestADroppedField:
-    """PreviousUnpaidBalance is kept nowhere, by nobody.
+    """Dropped fields are kept nowhere, by nobody.
 
-    Some invoices carry a previous balance that no reviewer is supposed to
-    confirm. The UI never offers it, and the backend filters it at every point a
-    value could enter or leave, so the field cannot be shown, stored or smuggled
-    back in through a correction.
+    Some invoice values there is nothing trustworthy left to do with — a
+    previous balance, or the amount due — so no reviewer is supposed to
+    confirm them. The UI never offers them, and the backend filters each at
+    every point a value could enter or leave, so the field cannot be shown,
+    stored or smuggled back in through a correction.
     """
 
     def test_a_dropped_field_never_reaches_the_response(
@@ -434,6 +435,7 @@ class TestADroppedField:
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
                     ExtractedField("PreviousUnpaidBalance", "50.00 EUR", 0.9),
+                    ExtractedField("AmountDue", "120.00 EUR", 0.6),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
                 ],
             )
@@ -442,6 +444,7 @@ class TestADroppedField:
         body = client.get(f"/api/invoices/{PARTITION}").json()
         names = body["documents"][0]["fields"].keys()
         assert "PreviousUnpaidBalance" not in names
+        assert "AmountDue" not in names
         assert set(names) == {"VendorName", "InvoiceTotal"}
 
     def test_a_dropped_field_is_not_stored_on_accept(
@@ -457,6 +460,7 @@ class TestADroppedField:
                         "fields": {
                             "VendorName": {"value": "Renamed"},
                             "PreviousUnpaidBalance": {"value": "1.00 EUR"},
+                            "AmountDue": {"value": "2.00 EUR"},
                         },
                     }
                 ]
@@ -466,6 +470,7 @@ class TestADroppedField:
         row = table.entities[(PARTITION, "doc-000")]
         assert row["f_VendorName"] == "Renamed"
         assert not [name for name in row if name.startswith("f_PreviousUnpaidBalance")]
+        assert not [name for name in row if name.startswith("f_AmountDue")]
 
     def test_a_stored_dropped_field_is_filtered_from_the_response(
         self, client, settings, table
@@ -626,7 +631,9 @@ class TestTotalTaxIsRequired:
                 index=0,
                 fields=[
                     ExtractedField("VendorName", "Acme", 0.99),
+                    ExtractedField("DueDate", "2026-03-01", 0.7),
                     ExtractedField("InvoiceTotal", "120.00 EUR", 0.95),
+                    ExtractedField("SubTotal", "100.00 EUR", 0.8),
                 ],
             )
         ]
