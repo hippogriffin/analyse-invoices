@@ -691,6 +691,20 @@ def test_upload_mode_hides_camera_only_controls():
     assert "stopCamera()" in body, "upload mode must not leave a camera running"
 
 
+def test_upload_opens_the_chooser_on_the_first_click():
+    """'Upload a photo' must bring up the OS chooser straight away.
+
+    The README promises it, and leaving the reviewer one button deeper means the
+    picker never appears for someone who expects the click to open it.
+    """
+    enter = re.search(r"function enterUploadMode\(\)\s*\{.*?\n  \}", APP_JS, re.S)
+    assert enter, "enterUploadMode not found"
+    # It must open the picker itself, not just reveal the fallback button.
+    assert "openFilePicker()" in enter.group(0), (
+        "entering upload mode must open the file chooser directly"
+    )
+
+
 def test_choose_another_reopens_the_picker():
     """In upload mode the second action reopens the picker, not the camera."""
     retake = re.search(r"function retake\(\)\s*\{.*?\n  \}", APP_JS, re.S)

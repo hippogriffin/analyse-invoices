@@ -158,9 +158,9 @@ default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
 ## Testing
 
 ```bash
-(cd frontend && ../backend/.venv/bin/python -m pytest)  # 87 checks
+(cd frontend && ../backend/.venv/bin/python -m pytest)  # 88 checks
 (cd backend  && .venv/bin/python -m pytest)  # 256 checks
-node frontend/scripts/check_ui.js            # 207 DOM checks, needs: npm install jsdom
+node frontend/scripts/check_ui.js            # 208 DOM checks, needs: npm install jsdom
 ```
 
 No suite contacts Azure, and none depends on a local `.env`. One backend
