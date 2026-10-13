@@ -1,4 +1,4 @@
-> [!AI-GENERATED CODE DISCLAIMER]
+### AI-generated code disclaimer
 >
 > Most of the code and documentation in this project has been generated using OpenCode.
 >
