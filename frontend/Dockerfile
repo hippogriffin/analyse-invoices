@@ -14,7 +14,7 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-cache-dir .
 
-COPY static ./static
+COPY ./static /app/static
 
 RUN addgroup -g 10001 -S appuser \
  && adduser -u 10001 -S -G appuser -h /home/appuser -s /sbin/nologin appuser
