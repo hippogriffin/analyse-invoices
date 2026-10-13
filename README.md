@@ -1,9 +1,28 @@
-# Invoice processing
+> [!AI-GENERATED CODE DISCLAIMER]
+>
+> Most of the code and documentation in this project has been generated using OpenCode.
+>
+> Many people are uncomfortable using applications that have been created using AI and I want to make this clear from the outset.
+>
+> No AI is used within the application itself as per the architecture diagrams.
+>
+> I am a DevOps engineer by trade but not a python expert. Best efforts have been made to check the code for bad practices but some may exist.
+>
+> This is a personal passion project that I wouldn't have got up and running easily without AI assistance.
+>
+> The code has been human reviewed and checks have been added to scan for vulnerabilities automatically.
+
+# Process invoices using Azure Document Intelligence
 
 Two containerised services that turn a photographed invoice into extracted data.
 
-Only the backend talks to Azure. The frontend is a camera UI that hands the
-chosen photo over the network, so it holds no credentials of any kind.
+The solution is composed of a python frontend that can take photos using the device camera or accept file uploads.
+
+The frontend connects to a FastAPI backend which connects to Azure Document Intelligence to perform the document analysis.
+
+The results of the analysis are returned to the frontend for the user to confirm and edit as needed before submission.
+
+The submitted values are stored in an Azure table.
 
 ```
 ┌──────────────┐ post/poll ┌──────────────────┐  forward  ┌──────────────────┐
@@ -119,9 +138,8 @@ uvicorn app.main:app --reload
 docker build -t invoice-analysis ./backend
 ```
 
-The browser no longer talks to this service directly: the frontend proxies to
-it server-to-server, so `CORS_ALLOW_ORIGINS` is not needed for the UI. It
-remains available for anything that calls this API from a browser directly.
+The browser does not talk to this directly; the frontend proxies to
+it server-to-server.
 
 ## Running both locally
 
@@ -134,6 +152,13 @@ cd frontend && PORT=8001 .venv/bin/python -m app
 
 Then open `http://localhost:8001`, or `http://<lan-ip>:8001` from another device. The analysis service allows all origins by
 default; narrow `CORS_ALLOW_ORIGINS` before exposing it anywhere.
+
+More conveniently, build the docker image and run the docker containers.
+
+See the deploy sections of the respective README files:
+
+- [backend](./backend/README.md#deploy)
+- [frontend](./frontend/README.md#deploy)
 
 ## Repository layout
 

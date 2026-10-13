@@ -26,9 +26,8 @@ everything below is relative to this directory.
 
 Flow in the browser:
 
-1. On load, the app shows the chooser. It does **not** ask for camera
-   permission, so nothing is prompted before the user has chosen.
-2. **Take a photo** requests the camera and shows a live preview. A **Zoom**
+1. On load, the app shows the available options. 
+2. **Take a photo** requests camera access and shows a live preview. A **Zoom**
    slider (1×–3×) enlarges the preview so an invoice can fill the frame from a
    distance; it is a digital centre crop, so the whole sensor resolution is kept
    and the captured photo is exactly the part the preview showed. **Take photo**
@@ -50,7 +49,7 @@ uploaded file keeps its filename. The stage sizes itself to the feed or the
 photo, so an invoice fills the frame edge to edge (no black bars around it) and
 the crop selection always lines up with the photo that is actually visible.
 
-The camera is stopped as soon as a photo is captured (privacy and battery), and
+The camera is stopped as soon as a photo is captured, and
 also on `pagehide`. Front-facing cameras are mirrored in the preview, and the
 mirror is baked into the captured image so the photo matches what you saw.
 
@@ -109,11 +108,11 @@ backend is configured, and that a cached page shell predating the allowance line
 still reaches the file picker. The script prints `SKIP` if jsdom
 is not installed, so it is safe to call in a pipeline.
 
-### Testing the camera on a desktop
+### Testing the camera
 
-Desktop webcams work. On a phone, open the site over HTTPS and grant camera
+Open the site over HTTPS and grant camera
 permission when the browser asks. Note that a phone on `http://<lan-ip>` will
-**not** get camera access — use HTTPS.
+**not** get camera access — use HTTPS when accessing from a phone.
 
 ## Installable as an app (PWA)
 
@@ -130,13 +129,6 @@ To install: on Android/Chrome use **Install app** (or the ⋮ → *Add to Home
 screen*); on iOS use Safari's Share sheet → **Add to Home Screen**. Both need a
 secure context (HTTPS), the same requirement the camera already has — so the
 deployed site installs, but `http://<lan-ip>` does not.
-
-The service worker is a bonus, never a dependency: the page works with it
-disabled or unregistered. Its strategy is **network-first** with a cache
-fallback, because the static files have no content-hashed names — a cache-first
-worker would pin an old `app.js` forever across deploys. It never handles
-`/api/` requests, so an upload or a result is always live and never served from
-a stale cache.
 
 ## Configuration
 
@@ -223,17 +215,13 @@ else Document Intelligence returns at extraction (an invoice id, a customer
 name, addresses, the previous unpaid balance, the amount due, ...) so no other
 value is ever on the wire or stored.
 
-Every reviewed field is **required**, the merchant no more and no less than the
-invoice date, the invoice total, the subtotal and the total tax. A document the
-model
-read one of them from nothing shows that row empty, labelled with a red
-"... is required." warning, ready to be filled in — and the document cannot be
+Every reviewed field is **required**. If the model could not
+read a value that corresponds to a field, it will be empty, labelled with a red
+"... is required." warning and stay ready to be filled in. The document cannot be
 accepted until every field holds a value. The backend enforces the same rule, so
 nothing is stored without them.
 
-There is no **Add a missing field** dropdown: the screen shows exactly the
-fields the model returned (plus, always, any required row). A field Document
-Intelligence did not read simply is not on screen. Values are constrained as
+Values are constrained as
 they are typed or pasted (money strips letters, a merchant strips markup and
 punctuation), and accepting is refused while an edited value does not fit.
 Nothing is kept off by wanting to type "*120.00 EUR*": only the bare number is
@@ -252,14 +240,10 @@ Once the fields are on screen, the app asks whether the photo was good enough:
   that is what makes the backend write the record.
 - **No, retake it** throws the reading away and immediately starts a new photo.
 
-The choice is not a note about the photo — it decides whether the invoice is
+The choice decides whether the invoice is
 kept at all. Nothing is written to Table Storage until "Yes", and "No" deletes
 the result server-side and answers `204`. The UI therefore clears the results
-and the panel and starts a new photo in one step, rather than printing "noted"
-and leaving rejected values on screen where they could still be accepted by
-mistake. The old "Noted. Take a clearer photo and send it again." line is gone
-for that reason: the reviewer has asked for a different photo, so a different
-photo is what happens.
+and the panel and starts a new photo in one step.
 
 If the same photo is submitted again, the backend deliberately does not analyse
 it a second time and answers with `alreadyProcessed`. The app then says the photo
@@ -269,9 +253,7 @@ but never accepted is *not* reported this way — nothing is stored yet, so the
 backend hands the values back and the reviewer lands on the answer they have not
 given, rather than being told it is already done.
 
-The photo itself is deleted by the backend as soon as it has been read, whichever
-answer is given, so the question is never about deleting it. The panel says so,
-because "the photo is gone" is otherwise a surprise.
+The photo itself is deleted by the backend as soon as it has been read.
 
 Once a reading is accepted the panel keeps a single button, relabelled **Choose
 another photo**: the invoice is settled, so offering to retake it would invite
@@ -346,9 +328,9 @@ az containerapp revision list -g <rg> -n <app> -o table
 ## Operational notes
 
 - **No auth on this service.** Anyone who can reach the ingress URL can submit a
-  photo to the backend. Add an Easy Auth / Entra ID front door or a private
-  endpoint if that matters.
-- **Container Apps must scale to at least 1 replica**; the default min is 0.
+  photo to the backend. It is recommended to place this service behind a firewall, VPN or a proxy.
+  Authentication can be added using services like [OAuth2 Proxy](https://github.com/oauth2-proxy/oauth2-proxy).
+- **Container Apps or Kubernetes must scale to at least 1 replica**; the default min is 0.
 - **The backend must be reachable from this container**, not the browser. It can
   stay on a private network or an in-cluster service name; no public ingress and
   no CORS entry are required for the UI to work.

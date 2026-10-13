@@ -1,8 +1,8 @@
 # Invoice analysis service
 
-Accepts a photo, stores it in Blob Storage, and extracts the invoice fields with
+Accepts a photo and extracts the invoice fields with
 Azure Document Intelligence. The result is held in memory until a reviewer accepts
-it, and only then written to Table Storage.
+it, and then written to Table Storage.
 
 This service owns every Azure credential and every blob name. The browser posts
 the image itself; it never names a blob and never holds a key.
@@ -97,11 +97,10 @@ released there so the photo can simply be sent again.
 
 Every source photo is deleted from blob storage once it has been read, in a
 `finally` block that runs whether the analysis succeeded or failed. Nothing is
-kept so that a later "discard" can act on it: the pixels are not the product,
-the extracted values are.
+kept so that a later "discard" can act on it.
 
 Once the fields are on screen the user is asked whether the photo was good
-enough. This is a question about the photo, not a request to delete it:
+enough:
 
 | Answer  | Request                | Meaning                              |
 | ------- | ---------------------- | ------------------------------------ |
@@ -127,15 +126,9 @@ POST /api/invoices/{invoiceId}/photo
 
 Each corrected document is matched by its `index` and only the fields it names
 are overridden; anything else keeps its extracted value, so a partial correction
-is enough. A field given an empty value is stored empty, and a correction for a
-page the model did not return is ignored rather than inventing a document. The
-merged result is what gets written, so the record holds what the reviewer
+is enough. The merged result is what gets written, so the record holds what the reviewer
 approved. Omitting the body stores the reading exactly as it came out of the
 model, and a second plain confirmation remains a no-op rather than a rewrite.
-
-Corrections also work on an already-stored record, which is how a value is fixed
-after a restart hands back a stored reading. Nothing about a confidence score is
-carried in a correction: a reading rewritten by a person has no meaningful score.
 
 The values a reviewer may correct are a fixed, reviewed set: the merchant, the
 invoice date, the invoice total, the subtotal, and the total tax. Storage is a
@@ -143,8 +136,7 @@ strict whitelist: those five — stored as `VendorName`, `InvoiceDate`,
 `InvoiceTotal`, `SubTotal` and `TotalTax` — are the only fields this service
 keeps. Everything else Document Intelligence returns (an invoice id, a customer
 name, addresses, `PreviousUnpaidBalance`, `AmountDue`, ...) is dropped from the
-extraction, so it is never stored, never returned, and a correction naming one
-is ignored rather than reintroducing it.
+extraction.
 
 Every reviewed field is **required**: a document missing any of them — whether
 the model did not read it, or a correction cleared it — is refused with `422`
@@ -154,11 +146,7 @@ row in the table always has them; this is the backstop behind the UI, which
 shows the empty required rows and blocks the accept button for the same reason.
 
 Saying no therefore takes the result away rather than recording an opinion about
-it. It deletes every row for the partition and returns `204` with no body, so the
-caller has nothing to render. That includes a record accepted before a restart,
-which the transient verdict has since forgotten: a reviewer saying the photo was
-not readable is saying the stored values are not to be trusted, whatever this
-process remembers about it.
+it.
 
 Neither answer touches blob storage. The photo is already gone by the time
 either is possible.
@@ -294,8 +282,8 @@ If you later need retries, dead-lettering or burst handling, move the same
 does not change.
 
 There is **no authentication on this API**. Anyone who can reach it can spend
-Document Intelligence quota. Put an Easy Auth / Entra ID front door or a private
-endpoint in front of it if that matters.
+Document Intelligence quota. This is not intended for public exposure. Ensure it cannot be accessed from the internet.
+It is recommended to connect to it over a private endpoint when using this service in Azure.
 
 ## Configuration
 
@@ -414,3 +402,7 @@ docker run -p 3333:3333 --env-file .env invoice-analysis
 Deploy the image to Azure Container Apps, Azure Container Apps Jobs or Azure
 Functions custom containers. Set `CORS_ALLOW_ORIGINS` to the frontend's origin,
 since the browser calls this service directly.
+
+The image can also be deployed to any kubernetes cluster.
+
+If using Azure, it is recommended to authenticate to Document Intelligence and Azure Storage using managed identity instead of account keys.
