@@ -396,6 +396,11 @@ async function captureAndUpload(win) {
   check("chooser gone", s.modePicker === false);
   check("workbench shown", s.workbench === true);
   check("choose-a-photo offered", s.pickFile === true);
+  check(
+    "the OS file chooser opens on the first click",
+    win.__pickerOpened === 1,
+    `${win.__pickerOpened} open(s)`
+  );
   check("camera not requested in upload mode", win.__cameraRequests === 0);
   check("preview hidden in upload mode", s.preview === false);
   check("take-photo button hidden in upload mode", s.capture === false);
@@ -1320,6 +1325,9 @@ async function captureAndUpload(win) {
     valuesOnScreen(win).includes("Acme"),
     win.document.getElementById("status").textContent
   );
+  // Choosing "Upload a photo" itself already opened the chooser once; count
+  // only what the retake does from here.
+  win.__pickerOpened = 0;
   win.document.getElementById("retakePhoto").click();
   await wait(300);
   win.document.getElementById("retakePhoto").click();

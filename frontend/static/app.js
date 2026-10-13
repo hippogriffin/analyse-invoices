@@ -261,6 +261,11 @@
     resetZoom();
     closeCrop();
     showPlaceholder("Choose an invoice photo from this device.");
+    // Open the chooser right away, as documented: one click on "Upload a photo"
+    // must bring up the OS picker. This still runs inside the button's own
+    // click, so the browser treats it as user-initiated. The "Choose a photo"
+    // button stays behind it for when the dialog is dismissed without a pick.
+    openFilePicker();
   }
 
   function openFilePicker() {
