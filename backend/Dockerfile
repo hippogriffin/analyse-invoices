@@ -1,4 +1,4 @@
-FROM python:3.15-alpine3.24
+FROM ubuntu/python:3.14-26.04_stable
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

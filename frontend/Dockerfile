@@ -1,4 +1,4 @@
-FROM python:3.15-alpine3.24
+FROM ubuntu/python:3.14-26.04_stable
 
 # Build from this directory:
 #   docker build -t invoice-upload ./frontend
