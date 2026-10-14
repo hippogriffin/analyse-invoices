@@ -16,7 +16,7 @@ WORKDIR /srv
 
 # Dependencies first so code edits do not invalidate the install layer.
 COPY pyproject.toml ./
-COPY --from=builder /install /usr/local
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY app ./app
 
 USER nonroot
