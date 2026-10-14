@@ -1,4 +1,4 @@
-FROM dhi.io/python:3.14
+FROM python:3.14-slim
 
 # Build from this directory:
 #   docker build -t invoice-upload ./frontend
@@ -15,7 +15,8 @@ COPY app ./app
 
 COPY static /app/static
 
-USER nonroot
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
 
 EXPOSE 8000
 
