@@ -1,14 +1,14 @@
 FROM python:3.14-slim
 
-# Build from this directory:
-#   docker build -t invoice-upload ./frontend
-#   docker build -t <registry>.azurecr.io/invoice-upload:v1 ./frontend
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
-
-WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
