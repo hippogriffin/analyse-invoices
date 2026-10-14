@@ -14,9 +14,7 @@ RUN python -m pip install -r requirements.txt --user
 
 COPY app ./app
 
-# Run unprivileged.
-RUN useradd --create-home --uid 10001 appuser
-USER appuser
+USER nonroot
 
 EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

@@ -15,8 +15,7 @@ COPY app ./app
 
 COPY static /app/static
 
-RUN useradd --create-home --uid 10001 appuser
-USER appuser
+USER nonroot
 
 EXPOSE 8000
 
