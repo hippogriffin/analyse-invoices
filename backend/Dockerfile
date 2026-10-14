@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN python -m pip install --user --prefix=/install -r requirements.txt
+RUN pip install -r requirements.txt
 
 FROM dhi.io/python:3.14
 
