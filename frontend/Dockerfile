@@ -16,8 +16,7 @@ RUN pip install --no-cache-dir .
 
 COPY ./static /app/static
 
-RUN addgroup -g 10001 -S appuser \
- && adduser -u 10001 -S -G appuser -h /home/appuser -s /sbin/nologin appuser
+RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 EXPOSE 8000

@@ -1,4 +1,4 @@
-FROM ubuntu/python:3.14-26.04_stable
+FROM python:FROM ubuntu/python:3.14-26.04_stable
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,8 +21,7 @@ RUN pip install --no-cache-dir \
 COPY app ./app
 
 # Run unprivileged.
-RUN addgroup -g 10001 -S appuser \
- && adduser -u 10001 -S -G appuser -h /home/appuser -s /sbin/nologin appuser
+RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 EXPOSE 3333
