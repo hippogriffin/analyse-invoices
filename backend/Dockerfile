@@ -1,3 +1,11 @@
+FROM python:3.14-slim AS builder
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN python -m pip install --user --prefix=/install -r requirements.txt
+
 FROM dhi.io/python:3.14
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,10 +16,7 @@ WORKDIR /srv
 
 # Dependencies first so code edits do not invalidate the install layer.
 COPY pyproject.toml ./
-COPY requirements.txt ./
-
-RUN python -m pip install -r requirements.txt --user
-
+COPY --from=builder /install /usr/local
 COPY app ./app
 
 USER nonroot
