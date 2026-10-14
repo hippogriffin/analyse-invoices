@@ -1,4 +1,12 @@
-FROM python:3.12-slim
+FROM python:3.14-slim AS builder
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
+
+FROM dhi.io/python:3.14
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -8,21 +16,10 @@ WORKDIR /srv
 
 # Dependencies first so code edits do not invalidate the install layer.
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir \
-      "fastapi>=0.115" \
-      "uvicorn[standard]>=0.32" \
-      "python-multipart>=0.0.9" \
-      "azure-identity>=1.19" \
-      "azure-storage-blob>=12.24" \
-      "azure-data-tables>=12.4" \
-      "azure-ai-documentintelligence>=1.0" \
-      "pydantic-settings>=2.6"
-
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY app ./app
 
-# Run unprivileged.
-RUN useradd --create-home --uid 10001 appuser
-USER appuser
+USER nonroot
 
 EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

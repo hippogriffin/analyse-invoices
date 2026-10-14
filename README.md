@@ -43,7 +43,6 @@ The submitted values are stored in an Azure table.
 | --- | --- | --- |
 | [`frontend/`](frontend/README.md) | Camera UI and file chooser, installable as an app (PWA). Serves the page, forwards API calls to the backend, and holds no Azure credentials | Docker container |
 | [`backend/`](backend/README.md) | Stores the photo, analyses it, and keeps the extracted invoice fields | Docker container |
-| `logic-app.json` | The Azure Logic App this replaces. Kept for reference. | Azure resource — **not** a container |
 
 ## How the pieces fit
 

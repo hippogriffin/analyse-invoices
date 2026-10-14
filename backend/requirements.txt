@@ -1,0 +1,9 @@
+fastapi == 0.143.1
+uvicorn [standard] == 0.54.0
+python-multipart == 0.0.32
+azure-identity == 1.26
+azure-storage-blob == 12.31.0
+azure-data-tables == 12.7.0
+azure-ai-documentintelligence == 1.0.2
+pydantic-settings == 2.16.0
+msgpack == 1.2.3
