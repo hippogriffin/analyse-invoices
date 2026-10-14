@@ -1,6 +1,6 @@
 fastapi == 0.115
 uvicorn [standard] == 0.32
-python-multipart == 0.0.9
+python-multipart == 0.0.32
 azure-identity == 1.19
 azure-storage-blob == 12.24
 azure-data-tables == 12.4
