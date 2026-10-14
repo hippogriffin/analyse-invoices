@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.9
+azure-identity>=1.19
+azure-storage-blob>=12.24
+azure-data-tables>=12.4
+"azure-ai-documentintelligence>=1.0
+pydantic-settings>=2.6

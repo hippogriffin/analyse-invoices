@@ -1,4 +1,4 @@
-FROM ubuntu/python:3.14-26.04_stable
+FROM dhi.io/python:3.14
 
 # Build from this directory:
 #   docker build -t invoice-upload ./frontend
@@ -12,9 +12,8 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
-RUN pip install --no-cache-dir .
 
-COPY ./static /app/static
+COPY static /app/static
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
