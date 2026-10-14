@@ -1,4 +1,4 @@
-FROM python:FROM ubuntu/python:3.14-26.04_stable
+FROM dhi.io/python:3.14
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
