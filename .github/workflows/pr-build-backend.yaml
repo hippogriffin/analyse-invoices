@@ -40,5 +40,12 @@ jobs:
           image-ref: analyse-invoices-backend:${{ github.sha }}
           format: 'table'
           ignore-unfixed: true
+          exit-code: '1'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results.sarif'
