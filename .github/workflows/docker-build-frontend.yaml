@@ -34,20 +34,21 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           MAIN_REF: main
+          APP: frontend
         run: |
           set -euo pipefail
 
           # read current version from workspace
-          if [ ! -f VERSION ]; then
+          if [ ! -f ./${APP}/VERSION ]; then
             echo "ERROR: VERSION file not found in workspace"
             exit 1
           fi
 
-          current=$(tr -d '[:space:]' < VERSION)
+          current=$(tr -d '[:space:]' < ./${APP}/VERSION)
           echo "Current VERSION: $current"
 
           # fetch VERSION from the default branch via raw.githubusercontent
-          raw_url="https://raw.githubusercontent.com/${REPO}/${MAIN_REF}/VERSION"
+          raw_url="https://raw.githubusercontent.com/${REPO}/${MAIN_REF}/${APP}/VERSION"
           
           echo "Fetching ${raw_url}"
           main_version=$(curl -fsSL "${raw_url}" || true)
