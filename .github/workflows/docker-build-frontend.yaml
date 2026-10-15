@@ -26,8 +26,10 @@ jobs:
 
       - name: Read version
         id: get_version
+        env:
+          APP: frontend
         run: |
-          echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+          echo "version=$(cat ${APP}/VERSION)" >> $GITHUB_OUTPUT
 
       - name: Compare VERSION to main
         id: compare_version
