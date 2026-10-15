@@ -65,7 +65,7 @@ jobs:
         with:
           platforms: linux/amd64, linux/arm64
           push: true
-          tags: ghcr.io/hippogriffin/analyse-invoices-backend:${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           context: ./backend
       
       - name: Run Trivy vulnerability scanner
