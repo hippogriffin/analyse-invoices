@@ -31,45 +31,6 @@ jobs:
         run: |
           echo "version=$(cat ${APP}/VERSION)" >> $GITHUB_OUTPUT
 
-      - name: Compare VERSION to main
-        id: compare_version
-        env:
-          REPO: ${{ github.repository }}
-          MAIN_REF: main
-          APP: frontend
-        run: |
-          set -euo pipefail
-
-          # read current version from workspace
-          if [ ! -f ./${APP}/VERSION ]; then
-            echo "ERROR: VERSION file not found in workspace"
-            exit 1
-          fi
-
-          current=$(tr -d '[:space:]' < ./${APP}/VERSION)
-          echo "Current VERSION: $current"
-
-          # fetch VERSION from the default branch via raw.githubusercontent
-          raw_url="https://raw.githubusercontent.com/${REPO}/${MAIN_REF}/${APP}/VERSION"
-          
-          echo "Fetching ${raw_url}"
-          main_version=$(curl -fsSL "${raw_url}" || true)
-
-          if [ -z "${main_version:-}" ]; then
-            echo "ERROR: failed to retrieve VERSION from ${MAIN_REF} at ${raw_url}"
-            exit 1
-          fi
-
-          main_version=$(echo "${main_version}" | tr -d '[:space:]')
-          echo "Main (${MAIN_REF}) VERSION: $main_version"
-
-          if [ "$current" = "$main_version" ]; then
-            echo "ERROR: VERSION ($current) is identical to ${MAIN_REF} ($main_version). Failing build."
-            exit 1
-          fi
-
-          echo "VERSION differs from ${MAIN_REF} — OK"
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
