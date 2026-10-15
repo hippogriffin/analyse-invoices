@@ -24,6 +24,49 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v6
 
+      - name: Read version
+        id: get_version
+        run: |
+          echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Compare VERSION to main
+        id: compare_version
+        env:
+          REPO: ${{ github.repository }}
+          MAIN_REF: main
+        run: |
+          set -euo pipefail
+
+          # read current version from workspace
+          if [ ! -f VERSION ]; then
+            echo "ERROR: VERSION file not found in workspace"
+            exit 1
+          fi
+
+          current=$(tr -d '[:space:]' < VERSION)
+          echo "Current VERSION: $current"
+
+          # fetch VERSION from the default branch via raw.githubusercontent
+          raw_url="https://raw.githubusercontent.com/${REPO}/${MAIN_REF}/VERSION"
+          
+          echo "Fetching ${raw_url}"
+          main_version=$(curl -fsSL "${raw_url}" || true)
+
+          if [ -z "${main_version:-}" ]; then
+            echo "ERROR: failed to retrieve VERSION from ${MAIN_REF} at ${raw_url}"
+            exit 1
+          fi
+
+          main_version=$(echo "${main_version}" | tr -d '[:space:]')
+          echo "Main (${MAIN_REF}) VERSION: $main_version"
+
+          if [ "$current" = "$main_version" ]; then
+            echo "ERROR: VERSION ($current) is identical to ${MAIN_REF} ($main_version). Failing build."
+            exit 1
+          fi
+
+          echo "VERSION differs from ${MAIN_REF} — OK"
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
@@ -31,7 +74,7 @@ jobs:
           images: |
             ghcr.io/hippogriffin/analyse-invoices-frontend
           tags: |
-            type=semver,pattern={{version}} 
+            type=semver,pattern={{version}},value=${{ steps.get_version.outputs.version }}
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4
@@ -52,13 +95,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate build ID
-        id: prep
-        run: |
-          sha=${GITHUB_SHA::8}
-          ts=$(date +%s)
-          echo "::set-output name=BUILD_ID::${sha}-${ts}"
-
       - name: Build and push Docker images
         id: push_frontend
         uses: docker/build-push-action@v7
@@ -71,7 +107,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: ghcr.io/hippogriffin/analyse-invoices-frontend:${{ steps.prep.outputs.BUILD_ID }}
+          image-ref: ghcr.io/hippogriffin/analyse-invoices-frontend:${{ steps.meta.outputs.tags }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
