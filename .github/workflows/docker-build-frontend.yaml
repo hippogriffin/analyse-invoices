@@ -60,19 +60,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Add timestamp
+        id: timestamp
+        run: |
+          ts=$(date +%s)
+          echo "::set-output name=BUILD_ID::${ts}"
+
       - name: Build and push Docker images
         id: push_frontend
         uses: docker/build-push-action@v7
         with:
           platforms: linux/amd64, linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ steps.timestamp.outputs.BUILD_ID }}
           context: ./frontend
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: ${{ steps.meta.outputs.tags }}
+          image-ref: ${{ steps.meta.outputs.tags }}-${{ steps.timestamp.outputs.BUILD_ID }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
